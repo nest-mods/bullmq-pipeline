@@ -4,9 +4,11 @@ import { Redis } from 'ioredis';
 
 import { withResourceScope } from './resource-lifecycle.ts';
 
-const reportQueueName = 'pietra-pipeline--social-analysis-report--report-work';
-const trendQueueName = 'pietra-pipeline--social-analysis-trend--generate-trend';
-const crawlQueueName = 'pietra-pipeline--social-analysis-crawl--crawl-source';
+const reportQueueName = 'pipeline--social-analysis-report--report-work';
+const trendQueueName = 'pipeline--social-analysis-trend--generate-trend';
+const crawlQueueName = 'pipeline--social-analysis-crawl--crawl-source';
+const pipelineKeyRoot = `${Deno.env.get('PIPELINE_KEY_PREFIX') ?? ''}pipeline:`;
+const pipelineRunsKey = `${pipelineKeyRoot}runs`;
 const connection = {
   host: Deno.env.get('REDIS_HOST') ?? 'redis',
   port: Number(Deno.env.get('REDIS_PORT') ?? '6379'),
@@ -166,8 +168,8 @@ async function seedDashboardFixtures(
   const [reportJob, trendJob, crawlJob] = jobs;
   const pipeline = redisClient.pipeline();
   const runId = 'dashboard-e2e-run';
-  pipeline.zadd('pietra:pipeline:runs', 1999997, runId);
-  pipeline.hset(`pietra:pipeline:run:${runId}`, {
+  pipeline.zadd(pipelineRunsKey, 1999997, runId);
+  pipeline.hset(pipelineRunKey(runId), {
     id: runId,
     name: 'social-analysis-report',
     pipelineName: 'social-analysis-report',
@@ -179,7 +181,7 @@ async function seedDashboardFixtures(
     updatedAt: 1784503600000,
   });
 
-  const nodesKey = `pietra:pipeline:run:${runId}:nodes`;
+  const nodesKey = `${pipelineRunKey(runId)}:nodes`;
   pipeline.zadd(
     nodesKey,
     1001,
@@ -219,7 +221,7 @@ async function seedDashboardFixtures(
     const state = await fixture.job.getState();
     const jobId = fixture.job.id;
     if (!jobId) throw new Error(`BullMQ job for ${fixture.id} has no ID`);
-    pipeline.hset(`pietra:pipeline:run:${runId}:node:${fixture.id}`, {
+    pipeline.hset(`${pipelineRunKey(runId)}:node:${fixture.id}`, {
       id: fixture.id,
       runId,
       pipelineName: fixture.pipelineName,
@@ -240,7 +242,7 @@ async function seedDashboardFixtures(
   }
 
   pipeline.zadd(
-    'pietra:pipeline:runs',
+    pipelineRunsKey,
     2000003,
     'missing-run',
     2000002,
@@ -254,7 +256,8 @@ async function seedDashboardFixtures(
     1999998,
     'dashboard-stress-run',
   );
-  pipeline.hset('pietra:pipeline:run:dashboard-expired-completed', {
+  const completedRunKey = pipelineRunKey('dashboard-expired-completed');
+  pipeline.hset(completedRunKey, {
     id: 'dashboard-expired-completed',
     name: 'expired-completed',
     pipelineName: 'retention-pipeline',
@@ -262,12 +265,12 @@ async function seedDashboardFixtures(
     expiresAt: 1,
   });
   pipeline.zadd(
-    'pietra:pipeline:run:dashboard-expired-completed:nodes',
+    `${completedRunKey}:nodes`,
     1,
     'expired-completed-node',
   );
   pipeline.hset(
-    'pietra:pipeline:run:dashboard-expired-completed:node:expired-completed-node',
+    `${completedRunKey}:node:expired-completed-node`,
     {
       id: 'expired-completed-node',
       runId: 'dashboard-expired-completed',
@@ -275,14 +278,14 @@ async function seedDashboardFixtures(
       stepName: 'retention-checkpoint',
     },
   );
-  pipeline.hset('pietra:pipeline:run:dashboard-expired-failed', {
+  pipeline.hset(pipelineRunKey('dashboard-expired-failed'), {
     id: 'dashboard-expired-failed',
     name: 'expired-failed',
     pipelineName: 'retention-pipeline',
     status: 'FAILED',
     expiresAt: 1,
   });
-  pipeline.hset('pietra:pipeline:run:dashboard-expired-running', {
+  pipeline.hset(pipelineRunKey('dashboard-expired-running'), {
     id: 'dashboard-expired-running',
     name: 'expired-running',
     pipelineName: 'retention-pipeline',
@@ -293,7 +296,8 @@ async function seedDashboardFixtures(
     updatedAt: 200,
     expiresAt: 1,
   });
-  pipeline.hset('pietra:pipeline:run:dashboard-malformed-run', {
+  const malformedRunKey = pipelineRunKey('dashboard-malformed-run');
+  pipeline.hset(malformedRunKey, {
     id: 'dashboard-malformed-run',
     name: '',
     pipelineName: '',
@@ -307,7 +311,7 @@ async function seedDashboardFixtures(
     expiresAt: 'NaN',
   });
 
-  const malformedNodesKey = 'pietra:pipeline:run:dashboard-malformed-run:nodes';
+  const malformedNodesKey = `${malformedRunKey}:nodes`;
   pipeline.zadd(
     malformedNodesKey,
     1,
@@ -318,7 +322,7 @@ async function seedDashboardFixtures(
     'missing-node-hash',
   );
   pipeline.hset(
-    'pietra:pipeline:run:dashboard-malformed-run:node:invalid-json-node',
+    `${malformedRunKey}:node:invalid-json-node`,
     {
       id: 'invalid-json-node',
       runId: '',
@@ -344,7 +348,7 @@ async function seedDashboardFixtures(
     },
   );
   pipeline.hset(
-    'pietra:pipeline:run:dashboard-malformed-run:node:wrong-type-node',
+    `${malformedRunKey}:node:wrong-type-node`,
     {
       id: 'wrong-type-node',
       runId: '',
@@ -370,7 +374,8 @@ async function seedDashboardFixtures(
     },
   );
 
-  pipeline.hset('pietra:pipeline:run:dashboard-stress-run', {
+  const stressRunKey = pipelineRunKey('dashboard-stress-run');
+  pipeline.hset(stressRunKey, {
     id: 'dashboard-stress-run',
     name: 'stress-pipeline',
     pipelineName: 'stress-pipeline',
@@ -380,14 +385,14 @@ async function seedDashboardFixtures(
     createdAt: 300,
     updatedAt: 400,
   });
-  const stressNodesKey = 'pietra:pipeline:run:dashboard-stress-run:nodes';
+  const stressNodesKey = `${stressRunKey}:nodes`;
   for (let depth = 0; depth < 10; depth++) {
     for (let index = 0; index < 20; index++) {
       const nodeId = stressNodeId(depth, index);
       const parentNodeIds = depth === 0 ? [] : [stressNodeId(depth - 1, index)];
       pipeline.zadd(stressNodesKey, depth * 20 + index, nodeId);
       pipeline.hset(
-        `pietra:pipeline:run:dashboard-stress-run:node:${nodeId}`,
+        `${stressRunKey}:node:${nodeId}`,
         {
           id: nodeId,
           runId: 'dashboard-stress-run',
@@ -408,8 +413,8 @@ async function seedDashboardFixtures(
   for (let index = 1; index <= 105; index++) {
     const suffix = String(index).padStart(3, '0');
     const bulkId = `dashboard-bulk-${suffix}`;
-    pipeline.zadd('pietra:pipeline:runs', 1000000 + index, bulkId);
-    pipeline.hset(`pietra:pipeline:run:${bulkId}`, {
+    pipeline.zadd(pipelineRunsKey, 1000000 + index, bulkId);
+    pipeline.hset(pipelineRunKey(bulkId), {
       id: bulkId,
       name: `bulk-${suffix}`,
       pipelineName: 'bulk-pipeline',
@@ -425,6 +430,10 @@ async function seedDashboardFixtures(
   if (results === null) throw new Error('Redis fixture pipeline was aborted');
   const commandError = results.find(([error]) => error !== null)?.[0];
   if (commandError) throw commandError;
+}
+
+function pipelineRunKey(runId: string): string {
+  return `${pipelineKeyRoot}run:${runId}`;
 }
 
 function stressNodeId(depth: number, index: number): string {

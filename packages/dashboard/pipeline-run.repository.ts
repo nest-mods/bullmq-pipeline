@@ -5,8 +5,6 @@ import type {
   PipelineRunSummary,
 } from './pipeline.types.ts';
 
-const PIPELINE_RUNS_KEY = 'pietra:pipeline:runs';
-
 export interface PipelineRedisClient {
   hgetall(key: string): Promise<Record<string, string>>;
   zrange(key: string, start: number, end: number): Promise<string[]>;
@@ -14,14 +12,26 @@ export interface PipelineRedisClient {
   zrem(key: string, ...members: string[]): Promise<number>;
 }
 
+export interface PipelineRunRepositoryOptions {
+  keyPrefix?: string;
+  now?: () => number;
+}
+
 export class PipelineRunRepository implements PipelineRunReader {
+  private readonly keyRoot: string;
+  private readonly now: () => number;
+
   constructor(
     private readonly redis: PipelineRedisClient,
-    private readonly now: () => number = Date.now,
-  ) {}
+    options: PipelineRunRepositoryOptions = {},
+  ) {
+    this.keyRoot = `${options.keyPrefix ?? ''}pipeline:`;
+    this.now = options.now ?? Date.now;
+  }
 
   async listRuns(limit = 100): Promise<PipelineRunSummary[]> {
-    const runIds = await this.redis.zrevrange(PIPELINE_RUNS_KEY, 0, -1);
+    const runsKey = `${this.keyRoot}runs`;
+    const runIds = await this.redis.zrevrange(runsKey, 0, -1);
     const runs = await Promise.all(
       runIds.map(async (runId) =>
         this.parseRun(await this.redis.hgetall(this.runKey(runId)))
@@ -32,7 +42,7 @@ export class PipelineRunRepository implements PipelineRunReader {
     );
 
     if (staleRunIds.length > 0) {
-      await this.redis.zrem(PIPELINE_RUNS_KEY, ...staleRunIds);
+      await this.redis.zrem(runsKey, ...staleRunIds);
     }
 
     const staleRunIdSet = new Set(staleRunIds);
@@ -151,7 +161,7 @@ export class PipelineRunRepository implements PipelineRunReader {
   }
 
   private runKey(runId: string): string {
-    return `pietra:pipeline:run:${runId}`;
+    return `${this.keyRoot}run:${runId}`;
   }
 
   private nodesKey(runId: string): string {

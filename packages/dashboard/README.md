@@ -23,6 +23,13 @@ directory resolves to its `mod.ts`, so a container can mount
 BULL_BOARD_EXTENSIONS='["/extensions/pipeline-dashboard"]'
 ```
 
+The optional `keyPrefix` is prepended verbatim to every dashboard Redis key. It
+defaults to an empty string; include any separator you want in the value:
+
+```sh
+BULL_BOARD_EXTENSIONS='[{"specifier":"/extensions/pipeline-dashboard","options":{"keyPrefix":"example:"}}]'
+```
+
 For HTTPS loading, point directly to `mod.ts` and replace `<commit-sha>` with an
 immutable full commit SHA:
 
@@ -45,17 +52,20 @@ BULL_BOARD_EXTENSIONS='["https://raw.githubusercontent.com/nest-mods/bullmq-pipe
 
 The dashboard reads these keys:
 
-- `pietra:pipeline:runs`: sorted-set index of run IDs.
-- `pietra:pipeline:run:{runId}`: run summary hash.
-- `pietra:pipeline:run:{runId}:nodes`: sorted-set index of node IDs.
-- `pietra:pipeline:run:{runId}:node:{nodeId}`: node snapshot hash.
+- `pipeline:runs`: sorted-set index of run IDs.
+- `pipeline:run:{runId}`: run summary hash.
+- `pipeline:run:{runId}:nodes`: sorted-set index of node IDs.
+- `pipeline:run:{runId}:node:{nodeId}`: node snapshot hash.
+
+These are the default keys. When `keyPrefix` is set, its exact value appears
+before `pipeline:` in each key.
 
 The list API reads the complete run sorted-set index in descending score order,
 filters stale entries, and then returns at most 100 runs by default. It does not
 modify run or node hash snapshots. A list read does use `ZREM` on
-`pietra:pipeline:runs` to remove IDs whose run hash is missing and finished
-`COMPLETED` or `FAILED` runs whose `expiresAt` has passed. Expired runs in any
-non-finished status remain in the index.
+`pipeline:runs` (with the configured prefix, if any) to remove IDs whose run
+hash is missing and finished `COMPLETED` or `FAILED` runs whose `expiresAt` has
+passed. Expired runs in any non-finished status remain in the index.
 
 ## Acceptance Test
 
@@ -72,5 +82,5 @@ creates real BullMQ jobs covering completion, retry-then-completion, and
 exhausted retries. A fixed `ghcr.io/puppeteer/puppeteer:24.16.0` image
 automatically runs Chromium through login, polling, detail/job navigation,
 responsive media modes, and session expiry. The suite also verifies proxied
-APIs, job states, Redis cleanup without snapshot deletion, and removes the
-Docker fixtures afterward.
+APIs, job states, and TypeScript-based Redis cleanup assertions without snapshot
+deletion, then removes the Docker fixtures afterward.

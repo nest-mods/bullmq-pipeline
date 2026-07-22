@@ -3,7 +3,7 @@ import { Queue } from 'bullmq';
 
 const expectedJobs = [
   {
-    queueName: 'pietra-pipeline--social-analysis-report--report-work',
+    queueName: 'pipeline--social-analysis-report--report-work',
     jobId: 'report-job',
     state: 'completed',
     attemptsMade: 1,
@@ -11,7 +11,7 @@ const expectedJobs = [
     progress: { records: 24 },
   },
   {
-    queueName: 'pietra-pipeline--social-analysis-trend--generate-trend',
+    queueName: 'pipeline--social-analysis-trend--generate-trend',
     jobId: 'trend-job',
     state: 'completed',
     attemptsMade: 2,
@@ -19,7 +19,7 @@ const expectedJobs = [
     progress: { records: 12 },
   },
   {
-    queueName: 'pietra-pipeline--social-analysis-crawl--crawl-source',
+    queueName: 'pipeline--social-analysis-crawl--crawl-source',
     jobId: 'crawl-job',
     state: 'failed',
     attemptsMade: 3,

@@ -1,13 +1,15 @@
 import type { BullBoardExtension } from 'bull-board-docker/extensions';
 import type { Request, Response } from 'express';
+import { parsePipelineDashboardOptions } from './pipeline-dashboard.options.ts';
 import dashboardHtml from './public/index.html' with { type: 'text' };
 import { PipelineRunRepository } from './pipeline-run.repository.ts';
 
 const extension: BullBoardExtension = {
   id: 'pipeline-dashboard',
   apiVersion: 1,
-  activate(context) {
-    const repository = new PipelineRunRepository(context.redis);
+  activate(context, rawOptions) {
+    const options = parsePipelineDashboardOptions(rawOptions);
+    const repository = new PipelineRunRepository(context.redis, options);
 
     context.router.get(
       '/api/pipelines',

@@ -7,17 +7,17 @@ const listApiPath = '/app/bull-board/ext/pipeline-dashboard/api/pipelines';
 const jobFixtures = [
   {
     nodeId: 'report-node',
-    queueName: 'pietra-pipeline--social-analysis-report--report-work',
+    queueName: 'pipeline--social-analysis-report--report-work',
     jobId: 'report-job',
   },
   {
     nodeId: 'trend-node',
-    queueName: 'pietra-pipeline--social-analysis-trend--generate-trend',
+    queueName: 'pipeline--social-analysis-trend--generate-trend',
     jobId: 'trend-job',
   },
   {
     nodeId: 'crawl-node',
-    queueName: 'pietra-pipeline--social-analysis-crawl--crawl-source',
+    queueName: 'pipeline--social-analysis-crawl--crawl-source',
     jobId: 'crawl-job',
   },
 ];

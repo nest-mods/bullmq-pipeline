@@ -21,6 +21,7 @@ services:
       - /workspace/packages/dashboard/test/seed.ts
     environment:
       REDIS_HOST: redis
+      PIPELINE_KEY_PREFIX: 'test:'
     volumes:
       - deno-cache:/deno-dir
       - type: bind
@@ -56,7 +57,7 @@ services:
       PORT: 80
       USER_LOGIN: test-user
       USER_PASSWORD: test-password
-      BULL_BOARD_EXTENSIONS: '["/extensions/pipeline-dashboard"]'
+      BULL_BOARD_EXTENSIONS: '[{"specifier":"/extensions/pipeline-dashboard","options":{"keyPrefix":"test:"}}]'
     volumes:
       - type: bind
         source: ..
@@ -148,14 +149,41 @@ services:
         condition: service_healthy
 
   redis-assertion:
-    image: redis:alpine
-    entrypoint: [sh, /test/assert-redis-cleanup.sh]
+    image: denoland/deno:alpine-2.9.3
+    working_dir: /workspace/packages/dashboard
+    entrypoint: deno
+    command:
+      - run
+      - --frozen
+      - --lock=/workspace/deno.lock
+      - --config=/workspace/deno.json
+      - --allow-env
+      - --allow-net
+      - /workspace/packages/dashboard/test/assert-redis-cleanup.ts
     environment:
       REDIS_HOST: redis
+      PIPELINE_KEY_PREFIX: 'test:'
     volumes:
+      - deno-cache:/deno-dir
       - type: bind
-        source: ./assert-redis-cleanup.sh
-        target: /test/assert-redis-cleanup.sh
+        source: ../../../deno.json
+        target: /workspace/deno.json
+        read_only: true
+      - type: bind
+        source: ../../../deno.lock
+        target: /workspace/deno.lock
+        read_only: true
+      - type: bind
+        source: ../deno.json
+        target: /workspace/packages/dashboard/deno.json
+        read_only: true
+      - type: bind
+        source: ./assert-redis-cleanup.ts
+        target: /workspace/packages/dashboard/test/assert-redis-cleanup.ts
+        read_only: true
+      - type: bind
+        source: ./resource-lifecycle.ts
+        target: /workspace/packages/dashboard/test/resource-lifecycle.ts
         read_only: true
     depends_on:
       redis:

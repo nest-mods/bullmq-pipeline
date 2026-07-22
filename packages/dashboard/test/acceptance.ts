@@ -4,15 +4,15 @@ const bullBoardBase = 'http://nginx/app/bull-board';
 const extensionBase = `${bullBoardBase}/ext/pipeline-dashboard`;
 const bullMqJobs = [
   {
-    queueName: 'pietra-pipeline--social-analysis-report--report-work',
+    queueName: 'pipeline--social-analysis-report--report-work',
     jobId: 'report-job',
   },
   {
-    queueName: 'pietra-pipeline--social-analysis-trend--generate-trend',
+    queueName: 'pipeline--social-analysis-trend--generate-trend',
     jobId: 'trend-job',
   },
   {
-    queueName: 'pietra-pipeline--social-analysis-crawl--crawl-source',
+    queueName: 'pipeline--social-analysis-crawl--crawl-source',
     jobId: 'crawl-job',
   },
 ];
@@ -399,7 +399,7 @@ assert.deepEqual(
       scopeId: 'report-scope',
       status: 'COMPLETED',
       parentNodeIds: [],
-      queueName: 'pietra-pipeline--social-analysis-report--report-work',
+      queueName: 'pipeline--social-analysis-report--report-work',
       jobId: 'report-job',
       attempt: 1,
       maxAttempts: 1,
@@ -413,7 +413,7 @@ assert.deepEqual(
       scopeId: 'trend-scope',
       status: 'COMPLETED',
       parentNodeIds: ['report-node'],
-      queueName: 'pietra-pipeline--social-analysis-trend--generate-trend',
+      queueName: 'pipeline--social-analysis-trend--generate-trend',
       jobId: 'trend-job',
       attempt: 2,
       maxAttempts: 3,
@@ -427,7 +427,7 @@ assert.deepEqual(
       scopeId: 'crawl-scope',
       status: 'FAILED',
       parentNodeIds: ['report-node'],
-      queueName: 'pietra-pipeline--social-analysis-crawl--crawl-source',
+      queueName: 'pipeline--social-analysis-crawl--crawl-source',
       jobId: 'crawl-job',
       attempt: 3,
       maxAttempts: 3,
