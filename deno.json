@@ -1,0 +1,21 @@
+{
+  "workspace": [
+    "packages/*"
+  ],
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "check": "deno fmt --check && deno lint && deno check --all packages/pipeline/src/index.ts packages/dashboard/mod.ts"
+  },
+  "fmt": {
+    "singleQuote": true,
+    "useTabs": false,
+    "indentWidth": 2
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
+    }
+  }
+}

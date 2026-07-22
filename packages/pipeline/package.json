@@ -1,0 +1,10 @@
+{
+  "name": "@nest-mods/bullmq-pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "description": "NestJS workflow orchestration framework powered by BullMQ",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  }
+}

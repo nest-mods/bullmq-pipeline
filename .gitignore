@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+.idea/
+.vscode/
+.codegraph/
+
+deno-coverage/
+.deno/
+
+# Local agent task artifacts
+.superpowers/
+docs/superpowers/
