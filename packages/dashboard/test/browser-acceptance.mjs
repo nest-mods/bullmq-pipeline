@@ -70,12 +70,11 @@ try {
     `expected the next list API request after five seconds, observed ${pollingDelay}ms`,
   );
 
-  const reportLink = await findLink(
+  await clickLinkByTextAndWaitForNavigation(
     page,
     '.pipeline-link',
     'social-analysis-report',
   );
-  await clickAndWaitForNavigation(page, reportLink);
   assert.equal(
     new URL(page.url()).searchParams.get('runId'),
     'dashboard-e2e-run',
@@ -116,9 +115,10 @@ try {
     jobFixtures[0].queueName,
     jobFixtures[0].jobId,
   );
-  const jobLink = await page.$('[data-node-id="report-node"] .job-link');
-  assert.ok(jobLink, 'the report node must render its Queue link');
-  const jobResponse = await clickAndWaitForNavigation(page, jobLink);
+  const jobResponse = await clickSelectorAndWaitForNavigation(
+    page,
+    '[data-node-id="report-node"] .job-link',
+  );
   assert.equal(
     jobResponse?.status(),
     200,
@@ -306,22 +306,43 @@ async function openList(page) {
   );
 }
 
-async function findLink(page, selector, text) {
-  const links = await page.$$(selector);
-  for (const link of links) {
-    const linkText = await link.evaluate((element) =>
-      element.textContent?.trim()
-    );
-    if (linkText === text) return link;
-  }
-  throw new Error(
-    `Unable to find ${selector} with text ${JSON.stringify(text)}`,
-  );
+async function clickLinkByTextAndWaitForNavigation(page, selector, text) {
+  const [navigation] = await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.evaluate(({ selector, text }) => {
+      const link = [...document.querySelectorAll(selector)].find((element) =>
+        element.textContent?.trim() === text
+      );
+      if (!(link instanceof HTMLElement)) {
+        throw new Error(
+          `Unable to find ${selector} with text ${JSON.stringify(text)}`,
+        );
+      }
+      link.click();
+    }, { selector, text }),
+  ]);
+  return navigation;
+}
+
+async function clickSelectorAndWaitForNavigation(page, selector) {
+  const [navigation] = await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) {
+        throw new Error(`Unable to find ${selector}`);
+      }
+      element.click();
+    }, selector),
+  ]);
+  return navigation;
 }
 
 async function clickAndWaitForNavigation(page, element) {
-  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
-  await element.click();
+  const [navigation] = await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    element.click(),
+  ]);
   return navigation;
 }
 
