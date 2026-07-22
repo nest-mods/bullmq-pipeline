@@ -19,3 +19,5 @@ deno-coverage/
 # Local agent task artifacts
 .superpowers/
 docs/superpowers/
+
+compose.local.yml

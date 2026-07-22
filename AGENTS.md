@@ -16,7 +16,8 @@ This repository is a Deno workspace for the future Node/NestJS npm library
 - Do not use npm, pnpm, or Yarn to install dependencies.
 - Treat the root `deno.lock` as authoritative. Deno manages `node_modules`,
   which remains ignored.
-- Run `deno install --frozen` and `deno task check` before committing.
+- Run `deno install --frozen` and `deno task check` before committing. Run
+  `deno task test:dashboard` for dashboard integration changes.
 - Check the root `deno.json` for additional package or E2E tasks added later.
 
 ## Implementation Boundaries
@@ -34,9 +35,9 @@ This repository is a Deno workspace for the future Node/NestJS npm library
 
 ## Testing And Data Safety
 
-- Verify dashboard integration behavior with the real `diluka/bull-board:next`
-  image plus disposable Docker Redis and Nginx with authentication enabled. Do
-  not replace this critical E2E path with mocks.
+- Verify dashboard integration behavior with `deno task test:dashboard`. It uses
+  the real `diluka/bull-board:next` image plus disposable Docker Redis and Nginx
+  with authentication enabled. Do not replace this critical E2E path with mocks.
 - Never read from or write to production or formal data sources during
   development or tests.
 - Redis writes in tests must target disposable Docker fixtures only.
