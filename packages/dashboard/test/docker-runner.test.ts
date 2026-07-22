@@ -5,17 +5,9 @@ const cleanupCommand = ['down', '--volumes', '--remove-orphans'];
 
 Deno.test('dashboard runner executes browser acceptance before final cleanup', async () => {
   const commands: RecordedCommand[] = [];
-  let disposals = 0;
 
-  const result = await runDashboardAcceptance({
-    compose: recordCommands(commands),
-    subscribeTermination: () => ({
-      signal: new Promise<never>(() => {}),
-      dispose: () => disposals++,
-    }),
-  });
+  await runDashboardAcceptance({ compose: recordCommands(commands) });
 
-  assert.equal(result, 0);
   assert.deepEqual(
     commands.map(({ args }) => args),
     [
@@ -27,7 +19,6 @@ Deno.test('dashboard runner executes browser acceptance before final cleanup', a
       cleanupCommand,
     ],
   );
-  assert.equal(disposals, 1);
 });
 
 Deno.test('dashboard runner preserves a primary failure after logs and cleanup', async () => {
@@ -38,11 +29,7 @@ Deno.test('dashboard runner preserves a primary failure after logs and cleanup',
   });
 
   await assert.rejects(
-    () =>
-      runDashboardAcceptance({
-        compose,
-        subscribeTermination: neverTerminates,
-      }),
+    () => runDashboardAcceptance({ compose }),
     (error) => error === primaryError,
   );
 
@@ -57,40 +44,6 @@ Deno.test('dashboard runner preserves a primary failure after logs and cleanup',
   );
 });
 
-Deno.test('dashboard runner maps termination signals after one final cleanup', async () => {
-  const cases = [
-    { signal: 'SIGINT', status: 130 },
-    { signal: 'SIGTERM', status: 143 },
-  ] as const;
-
-  for (const testCase of cases) {
-    const commands: RecordedCommand[] = [];
-    const termination = deferred<(typeof cases)[number]['signal']>();
-    let disposals = 0;
-    const compose = recordCommands(commands, (args) => {
-      if (args[0] === 'up') return new Promise<never>(() => {});
-    });
-
-    const running = runDashboardAcceptance({
-      compose,
-      subscribeTermination: () => ({
-        signal: termination.promise,
-        dispose: () => disposals++,
-      }),
-    });
-    termination.resolve(testCase.signal);
-
-    assert.equal(await running, testCase.status);
-    assert.deepEqual(commands.at(-1)?.args, cleanupCommand);
-    assert.equal(
-      commands.filter(({ args }) => args[0] === 'down').length,
-      1,
-      `${testCase.signal} must clean up exactly once`,
-    );
-    assert.equal(disposals, 1);
-  }
-});
-
 interface RecordedCommand {
   args: string[];
   requireSuccess: boolean;
@@ -98,28 +51,12 @@ interface RecordedCommand {
 
 function recordCommands(
   commands: RecordedCommand[],
-  beforeResult: (
-    args: string[],
-  ) => void | Promise<never> = () => {},
+  beforeResult: (args: string[]) => void = () => {},
 ) {
   return async (args: string[], requireSuccess = true) => {
     commands.push({ args: [...args], requireSuccess });
-    await beforeResult(args);
+    beforeResult(args);
+    await Promise.resolve();
     return { code: 0, output: '' };
   };
-}
-
-function neverTerminates() {
-  return {
-    signal: new Promise<never>(() => {}),
-    dispose() {},
-  };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
 }

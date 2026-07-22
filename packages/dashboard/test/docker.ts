@@ -8,56 +8,15 @@ export interface CommandResult {
   output: string;
 }
 
-export interface TerminationSubscription {
-  signal: Promise<'SIGINT' | 'SIGTERM'>;
-  dispose(): void;
-}
-
 export interface DashboardAcceptanceDependencies {
   compose?: (
     args: string[],
     requireSuccess?: boolean,
   ) => Promise<CommandResult>;
-  subscribeTermination?: () => TerminationSubscription;
 }
 
 export async function runDashboardAcceptance(
-  {
-    compose: executeCompose = compose,
-    subscribeTermination = subscribeToTermination,
-  }: DashboardAcceptanceDependencies = {},
-): Promise<number> {
-  const termination = subscribeTermination();
-  let cleanupPromise: Promise<void> | undefined;
-  const cleanup = () => {
-    cleanupPromise ??= Promise.resolve()
-      .then(() => executeCompose(cleanupArgs))
-      .then(() => undefined);
-    return cleanupPromise;
-  };
-  const workflow = runAcceptanceWorkflow(executeCompose, cleanup);
-
-  try {
-    const outcome = await Promise.race([
-      workflow.then(() => ({ kind: 'completed' }) as const),
-      termination.signal.then((signal) =>
-        ({ kind: 'terminated', signal }) as const
-      ),
-    ]);
-
-    if (outcome.kind === 'completed') return 0;
-
-    void workflow.catch(() => {});
-    await cleanup();
-    return outcome.signal === 'SIGINT' ? 130 : 143;
-  } finally {
-    termination.dispose();
-  }
-}
-
-async function runAcceptanceWorkflow(
-  executeCompose: NonNullable<DashboardAcceptanceDependencies['compose']>,
-  cleanup: () => Promise<void>,
+  { compose: executeCompose = compose }: DashboardAcceptanceDependencies = {},
 ): Promise<void> {
   let primaryFailed = false;
   let primaryError: unknown;
@@ -94,7 +53,7 @@ async function runAcceptanceWorkflow(
     }
   } finally {
     try {
-      await cleanup();
+      await executeCompose(cleanupArgs);
     } catch (error) {
       cleanupFailed = true;
       cleanupError = error;
@@ -109,30 +68,6 @@ async function runAcceptanceWorkflow(
   }
   if (primaryFailed) throw primaryError;
   if (cleanupFailed) throw cleanupError;
-}
-
-function subscribeToTermination(): TerminationSubscription {
-  let resolveSignal!: (signal: 'SIGINT' | 'SIGTERM') => void;
-  const signal = new Promise<'SIGINT' | 'SIGTERM'>((resolve) => {
-    resolveSignal = resolve;
-  });
-  const onInterrupt = () => resolveSignal('SIGINT');
-  const onTerminate = () => resolveSignal('SIGTERM');
-
-  Deno.addSignalListener('SIGINT', onInterrupt);
-  if (Deno.build.os !== 'windows') {
-    Deno.addSignalListener('SIGTERM', onTerminate);
-  }
-
-  return {
-    signal,
-    dispose() {
-      Deno.removeSignalListener('SIGINT', onInterrupt);
-      if (Deno.build.os !== 'windows') {
-        Deno.removeSignalListener('SIGTERM', onTerminate);
-      }
-    },
-  };
 }
 
 async function compose(
@@ -159,5 +94,5 @@ async function compose(
 }
 
 if (import.meta.main) {
-  Deno.exit(await runDashboardAcceptance());
+  await runDashboardAcceptance();
 }
