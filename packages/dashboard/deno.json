@@ -3,6 +3,7 @@
     "skipLibCheck": true,
     "types": ["npm:@types/node@24.13.3"]
   },
+  "exclude": ["test/browser-acceptance.mjs"],
   "imports": {
     "bull-board-docker/extensions": "https://raw.githubusercontent.com/Diluka/bull-board-docker/852a969cbeb515be7d0207e03f1827aaf76f2bd5/src/extensions/api.ts",
     "bull": "npm:bull@4.16.5",

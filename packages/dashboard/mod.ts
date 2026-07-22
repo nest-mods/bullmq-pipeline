@@ -40,7 +40,7 @@ const extension: BullBoardExtension = {
       root: new URL('./public/', import.meta.url),
       preload: [
         'index.html',
-        'pipeline-dashboard.js',
+        'pipeline-dashboard.ts',
         'pipeline-dashboard.css',
       ],
     });

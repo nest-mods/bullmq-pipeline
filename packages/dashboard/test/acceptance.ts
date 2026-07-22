@@ -159,7 +159,10 @@ assert.equal(
 );
 const extensionPage = await extensionResponse.text();
 assert.match(extensionPage, /href=["']\.\/pipeline-dashboard\.css["']/);
-assert.match(extensionPage, /src=["']\.\/pipeline-dashboard\.js["']/);
+assert.match(
+  extensionPage,
+  /<script type=["']module["'] src=["']\.\/pipeline-dashboard\.ts["']><\/script>/,
+);
 
 const queryPageResponse = await request(
   `${extensionBase}/?runId=dashboard-e2e-run`,
@@ -177,7 +180,7 @@ assert.equal(
 );
 
 const scriptResponse = await request(
-  `${extensionBase}/pipeline-dashboard.js`,
+  `${extensionBase}/pipeline-dashboard.ts`,
   cookie,
 );
 assert.equal(scriptResponse.status, 200);
@@ -186,24 +189,24 @@ assert.equal(
   'text/javascript; charset=utf-8',
 );
 const scriptSource = await scriptResponse.text();
-assert.ok(
-  scriptSource.includes('\${pipelineName}\\u0000\${stepName}'),
+assert.match(
+  scriptSource,
+  /`\$\{pipelineName\}\\(?:0|u0000)\$\{stepName\}`/,
   'pipeline and step grouping must preserve the collision-free upstream separator',
 );
-assert.ok(
-  scriptSource.includes(
-    "const extensionRoot = new URL('.', globalThis.location.href);",
-  ),
+assert.match(
+  scriptSource,
+  /const extensionRoot = new URL\((['"])\.\1, globalThis\.location\.href\);/,
   'browser APIs and detail links must resolve from the extension root',
 );
-assert.ok(
-  scriptSource.includes("const boardRoot = new URL('../../', extensionRoot);"),
+assert.match(
+  scriptSource,
+  /const boardRoot = new URL\((['"])\.\.\/\.\.\/\1, extensionRoot\);/,
   'BullMQ job links must resolve from the Bull Board host root',
 );
-assert.ok(
-  scriptSource.includes(
-    "return new URL(pathname.replace(/^\\/+/, ''), extensionRoot);",
-  ),
+assert.match(
+  scriptSource,
+  /return new URL\(pathname\.replace\(\/\^\\\/\+\/, (['"])\1\), extensionRoot\);/,
   'API paths must resolve relative to the mounted extension',
 );
 assert.match(
@@ -213,21 +216,22 @@ assert.match(
 );
 assert.match(
   scriptSource,
-  /function pipelineRunPath\(id\)\s*\{\s*const url = new URL\(extensionRoot\);\s*url\.searchParams\.set\('runId', id\);/,
+  /function pipelineRunPath\(id\)\s*\{\s*const url = new URL\(extensionRoot\);\s*url\.searchParams\.set\((['"])runId\1, id\);/,
   'detail navigation must remain on the extension query page',
 );
 assert.ok(
-  scriptSource.includes(
-    "new URLSearchParams(globalThis.location.search).get('runId')",
-  ) && scriptSource.includes('pipelineLink.href = pipelineRunPath(run.id);'),
+  /new URLSearchParams\(globalThis\.location\.search\)\.get\((['"])runId\1\)/
+    .test(scriptSource) &&
+    scriptSource.includes('pipelineLink.href = pipelineRunPath(run.id);'),
   'list links and page loading must use the runId query contract',
 );
 assert.ok(
   scriptSource.includes('`/api/pipelines/${encodeURIComponent(runId)}`'),
   'detail requests must use the extension-relative encoded run URL',
 );
-assert.ok(
-  scriptSource.includes("requestJson('/api/pipelines')"),
+assert.match(
+  scriptSource,
+  /requestJson\((['"])\/api\/pipelines\1\)/,
   'list requests must use the extension-relative API',
 );
 assert.ok(
@@ -237,12 +241,12 @@ assert.ok(
 );
 assert.match(
   scriptSource,
-  /const interval = pollingInterval\(\);\s*if \(interval > 0\) \{\s*globalThis\.setInterval\(loadPipelineDashboard, interval \* 1_000\);/,
+  /const interval = pollingInterval\(\);\s*if \(interval > 0\) \{\s*globalThis\.setInterval\(loadPipelineDashboard, interval \* (?:1_000|1e3)\);/,
   'browser polling must schedule using the resolved polling interval',
 );
 assert.match(
   scriptSource,
-  /if \(response\.redirected && !contentType\.includes\('application\/json'\)\) \{\s*globalThis\.location\.assign\(response\.url\);\s*return null;/,
+  /if \(response\.redirected && !contentType\.includes\((['"])application\/json\1\)\) \{\s*globalThis\.location\.assign\(response\.url\);\s*return null;/,
   'expired login redirects must navigate the browser to the login response',
 );
 assert.ok(
@@ -257,12 +261,22 @@ assert.doesNotMatch(
 );
 assert.match(
   scriptSource,
-  /function jobPath\(queueName, jobId\)\s*\{\s*return new URL\(\s*`queue\/\$\{encodeURIComponent\(queueName\)\}\/\$\{encodeURIComponent\(jobId\)\}`,\s*boardRoot,/,
+  /function jobPath\(queueName, jobId\)\s*\{\s*return new URL\(\s*`queue\/\$\{encodeURIComponent\(queueName\)\}\/\$\{encodeURIComponent\(jobId\)\}`,\s*boardRoot,?\s*\)\.href;/,
   'BullMQ links must retain encoded host-root queue and job paths',
 );
 assert.ok(
   scriptSource.includes('link.href = jobPath(node.queueName, node.jobId);'),
   'node cards must use the host-root BullMQ job URL builder',
+);
+
+const legacyScriptResponse = await request(
+  `${extensionBase}/pipeline-dashboard.js`,
+  cookie,
+);
+assert.equal(
+  legacyScriptResponse.status,
+  404,
+  'the legacy JavaScript browser entry must not remain mounted',
 );
 
 const stylesheetResponse = await request(

@@ -1,64 +1,131 @@
+interface PipelineRunSummary {
+  id: string;
+  name: string;
+  pipelineName: string;
+  status: string;
+  error: string;
+  pendingNodes: number;
+  failedNodes: number;
+  createdAt: number | null;
+  updatedAt: number | null;
+  completedAt: number | null;
+  expiresAt: number | null;
+}
+
+interface PipelineNodeSnapshot {
+  id: string;
+  runId: string;
+  pipelineName: string;
+  invocationId: string;
+  scopeId: string;
+  name: string;
+  stepName: string;
+  stage: string;
+  status: string;
+  parentNodeIds: string[];
+  queueName: string;
+  jobId: string;
+  attempt: number;
+  maxAttempts: number;
+  progress: Record<string, unknown>;
+  forkName: string;
+  error: string;
+  createdAt: number | null;
+  updatedAt: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
+interface PipelineRunDetails {
+  run: PipelineRunSummary;
+  nodes: PipelineNodeSnapshot[];
+}
+
+interface PipelineRunsResponse {
+  runs: PipelineRunSummary[];
+}
+
+interface PipelineGraphGroup {
+  pipelineName: string;
+  stepName: string;
+  nodes: PipelineNodeSnapshot[];
+}
+
+interface PipelineGraphColumn {
+  depth: number;
+  groups: PipelineGraphGroup[];
+}
+
 (() => {
-  const root = document.querySelector('#pipeline-dashboard');
+  const root = document.querySelector<HTMLElement>('#pipeline-dashboard');
   if (!root) return;
 
   const extensionRoot = new URL('.', globalThis.location.href);
   const boardRoot = new URL('../../', extensionRoot);
   const runId = new URLSearchParams(globalThis.location.search).get('runId') ||
     '';
-  const nodeElements = new Map();
-  let resizeObserver;
-  let redrawEdges;
+  const nodeElements = new Map<string, HTMLElement>();
+  let resizeObserver: ResizeObserver | undefined;
+  let redrawEdges: (() => void) | undefined;
 
   globalThis.addEventListener('resize', () => redrawEdges?.(), {
     passive: true,
   });
 
-  function element(tag, className, text) {
+  function element<Tag extends keyof HTMLElementTagNameMap>(
+    tag: Tag,
+    className = '',
+    text?: unknown,
+  ): HTMLElementTagNameMap[Tag] {
     const result = document.createElement(tag);
     if (className) result.className = className;
     if (text !== undefined) result.textContent = String(text);
     return result;
   }
 
-  function append(parent, ...children) {
-    parent.append(...children.filter(Boolean));
+  function append<Parent extends HTMLElement>(
+    parent: Parent,
+    ...children: Array<HTMLElement | SVGElement | null | undefined>
+  ): Parent {
+    parent.append(
+      ...children.filter(Boolean) as Array<HTMLElement | SVGElement>,
+    );
     return parent;
   }
 
-  function normalizeStatus(value) {
+  function normalizeStatus(value: unknown): string {
     return String(value || 'PENDING').toUpperCase();
   }
 
-  function statusBadge(value) {
+  function statusBadge(value: unknown): HTMLSpanElement {
     const status = normalizeStatus(value);
     const badge = element('span', 'status', status);
     badge.dataset.status = status;
     return badge;
   }
 
-  function formatTime(value) {
+  function formatTime(value: number | null): string {
     return value ? new Date(value).toLocaleString() : '-';
   }
 
-  function extensionUrl(pathname) {
+  function extensionUrl(pathname: string): URL {
     return new URL(pathname.replace(/^\/+/, ''), extensionRoot);
   }
 
-  function pipelineRunPath(id) {
+  function pipelineRunPath(id: string): string {
     const url = new URL(extensionRoot);
     url.searchParams.set('runId', id);
     return url.href;
   }
 
-  function jobPath(queueName, jobId) {
+  function jobPath(queueName: string, jobId: string): string {
     return new URL(
       `queue/${encodeURIComponent(queueName)}/${encodeURIComponent(jobId)}`,
       boardRoot,
     ).href;
   }
 
-  async function requestJson(pathname) {
+  async function requestJson<T>(pathname: string): Promise<T | null> {
     const response = await fetch(extensionUrl(pathname), {
       headers: { Accept: 'application/json' },
     });
@@ -72,17 +139,17 @@
     if (!response.ok) {
       let message = `Request failed with status ${response.status}`;
       if (contentType.includes('application/json')) {
-        const body = await response.json();
+        const body = await response.json() as { error?: unknown };
         if (body && body.error) message = String(body.error);
       }
       throw new Error(message);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
-  function renderError(error) {
-    root.replaceChildren(
+  function renderError(error: unknown): void {
+    root!.replaceChildren(
       element(
         'div',
         'error',
@@ -91,7 +158,7 @@
     );
   }
 
-  function renderRuns(runs) {
+  function renderRuns(runs: PipelineRunSummary[]): void {
     const section = element('section', 'page');
     const header = element('header', 'page-header');
     const title = element('div');
@@ -107,7 +174,7 @@
       section.append(
         element('div', 'empty', 'No pipeline runs have reported progress yet.'),
       );
-      root.replaceChildren(section);
+      root!.replaceChildren(section);
       return;
     }
 
@@ -156,22 +223,24 @@
     append(table, head, body);
     frame.append(table);
     section.append(frame);
-    root.replaceChildren(section);
+    root!.replaceChildren(section);
   }
 
-  function layoutNodes(nodes) {
-    const nodesById = new Map(nodes.map((node) => [node.id, node]));
-    const depths = new Map();
-    const visiting = new Set();
+  function layoutNodes(nodes: PipelineNodeSnapshot[]): PipelineGraphColumn[] {
+    const nodesById = new Map<string, PipelineNodeSnapshot>(
+      nodes.map((node) => [node.id, node]),
+    );
+    const depths = new Map<string, number>();
+    const visiting = new Set<string>();
 
-    function depthOf(node) {
-      if (depths.has(node.id)) return depths.get(node.id);
+    function depthOf(node: PipelineNodeSnapshot): number {
+      if (depths.has(node.id)) return depths.get(node.id)!;
       if (visiting.has(node.id)) return 0;
 
       visiting.add(node.id);
       const parents = (node.parentNodeIds || [])
         .map((parentId) => nodesById.get(parentId))
-        .filter(Boolean);
+        .filter(Boolean) as PipelineNodeSnapshot[];
       const depth = parents.length === 0
         ? 0
         : Math.max(...parents.map((parent) => depthOf(parent))) + 1;
@@ -180,18 +249,18 @@
       return depth;
     }
 
-    const columns = new Map();
+    const columns = new Map<number, Map<string, PipelineGraphGroup>>();
     nodes.forEach((node) => {
       const depth = depthOf(node);
       if (!columns.has(depth)) columns.set(depth, new Map());
       const pipelineName = node.pipelineName || 'pipeline';
       const stepName = node.stepName || node.stage || node.name || 'unassigned';
       const key = `${pipelineName}\u0000${stepName}`;
-      const groups = columns.get(depth);
+      const groups = columns.get(depth)!;
       if (!groups.has(key)) {
         groups.set(key, { pipelineName, stepName, nodes: [] });
       }
-      groups.get(key).nodes.push(node);
+      groups.get(key)!.nodes.push(node);
     });
 
     return [...columns.entries()]
@@ -199,7 +268,7 @@
       .map(([depth, groups]) => ({ depth, groups: [...groups.values()] }));
   }
 
-  function nodeCard(node) {
+  function nodeCard(node: PipelineNodeSnapshot): HTMLElement {
     const card = element('article', 'node');
     card.dataset.status = normalizeStatus(node.status);
     card.dataset.nodeId = node.id;
@@ -266,7 +335,7 @@
     return card;
   }
 
-  function createConnectors() {
+  function createConnectors(): SVGSVGElement {
     const namespace = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(namespace, 'svg');
     svg.classList.add('connectors');
@@ -289,7 +358,11 @@
     return svg;
   }
 
-  function updateEdges(nodes, canvas, connectors) {
+  function updateEdges(
+    nodes: PipelineNodeSnapshot[],
+    canvas: HTMLElement,
+    connectors: SVGSVGElement,
+  ): void {
     connectors.querySelectorAll('.connector').forEach((edge) => edge.remove());
     const canvasRect = canvas.getBoundingClientRect();
     const namespace = 'http://www.w3.org/2000/svg';
@@ -325,7 +398,7 @@
     });
   }
 
-  function pipelineGraph(nodes) {
+  function pipelineGraph(nodes: PipelineNodeSnapshot[]): HTMLDivElement {
     nodeElements.clear();
     resizeObserver?.disconnect();
 
@@ -384,15 +457,16 @@
     redrawEdges = () => updateEdges(nodes, canvas, connectors);
     requestAnimationFrame(redrawEdges);
     if ('ResizeObserver' in globalThis) {
-      resizeObserver = new ResizeObserver(redrawEdges);
-      resizeObserver.observe(canvas);
-      nodeElements.forEach((node) => resizeObserver.observe(node));
+      const observer = new ResizeObserver(redrawEdges);
+      resizeObserver = observer;
+      observer.observe(canvas);
+      nodeElements.forEach((node) => observer.observe(node));
     }
 
     return viewport;
   }
 
-  function renderRun(details) {
+  function renderRun(details: PipelineRunDetails): void {
     const { run, nodes } = details;
     const section = element('section', 'page');
     const header = element('header', 'page-header');
@@ -422,18 +496,20 @@
         ? element('div', 'empty', 'Waiting for pipeline tasks.')
         : pipelineGraph(nodes),
     );
-    root.replaceChildren(section);
+    root!.replaceChildren(section);
   }
 
-  async function loadPipelineDashboard() {
+  async function loadPipelineDashboard(): Promise<void> {
     try {
       if (runId) {
-        const details = await requestJson(
+        const details = await requestJson<PipelineRunDetails>(
           `/api/pipelines/${encodeURIComponent(runId)}`,
         );
         if (details) renderRun(details);
       } else {
-        const response = await requestJson('/api/pipelines');
+        const response = await requestJson<PipelineRunsResponse>(
+          '/api/pipelines',
+        );
         if (response) renderRuns(response.runs || []);
       }
     } catch (error) {
@@ -441,11 +517,11 @@
     }
   }
 
-  function pollingInterval() {
+  function pollingInterval(): number {
     try {
       const settings = JSON.parse(
         localStorage.getItem('board-settings') || '{}',
-      );
+      ) as { state?: { pollingInterval?: unknown } };
       const value = Number(settings?.state?.pollingInterval);
       return Number.isFinite(value) ? value : 5;
     } catch {
