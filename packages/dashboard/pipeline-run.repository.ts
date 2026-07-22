@@ -1,7 +1,6 @@
 import type {
   PipelineNodeSnapshot,
   PipelineRunDetails,
-  PipelineRunReader,
   PipelineRunSummary,
 } from './pipeline.types.ts';
 
@@ -15,6 +14,11 @@ export interface PipelineRedisClient {
 export interface PipelineRunRepositoryOptions {
   keyPrefix?: string;
   now?: () => number;
+}
+
+export interface PipelineRunReader {
+  listRuns(limit?: number): Promise<PipelineRunSummary[]>;
+  getRun(runId: string): Promise<PipelineRunDetails | null>;
 }
 
 export class PipelineRunRepository implements PipelineRunReader {

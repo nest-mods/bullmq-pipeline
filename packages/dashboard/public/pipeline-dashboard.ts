@@ -1,49 +1,10 @@
-interface PipelineRunSummary {
-  id: string;
-  name: string;
-  pipelineName: string;
-  status: string;
-  error: string;
-  pendingNodes: number;
-  failedNodes: number;
-  createdAt: number | null;
-  updatedAt: number | null;
-  completedAt: number | null;
-  expiresAt: number | null;
-}
-
-interface PipelineNodeSnapshot {
-  id: string;
-  runId: string;
-  pipelineName: string;
-  invocationId: string;
-  scopeId: string;
-  name: string;
-  stepName: string;
-  stage: string;
-  status: string;
-  parentNodeIds: string[];
-  queueName: string;
-  jobId: string;
-  attempt: number;
-  maxAttempts: number;
-  progress: Record<string, unknown>;
-  forkName: string;
-  error: string;
-  createdAt: number | null;
-  updatedAt: number | null;
-  startedAt: number | null;
-  completedAt: number | null;
-}
-
-interface PipelineRunDetails {
-  run: PipelineRunSummary;
-  nodes: PipelineNodeSnapshot[];
-}
-
-interface PipelineRunsResponse {
-  runs: PipelineRunSummary[];
-}
+import type {
+  PipelineErrorResponse,
+  PipelineNodeSnapshot,
+  PipelineRunDetails,
+  PipelineRunsResponse,
+  PipelineRunSummary,
+} from '../pipeline.types.ts';
 
 interface PipelineGraphGroup {
   pipelineName: string;
@@ -139,8 +100,8 @@ interface PipelineGraphColumn {
     if (!response.ok) {
       let message = `Request failed with status ${response.status}`;
       if (contentType.includes('application/json')) {
-        const body = await response.json() as { error?: unknown };
-        if (body && body.error) message = String(body.error);
+        const body = await response.json() as PipelineErrorResponse;
+        if (body && body.error) message = body.error;
       }
       throw new Error(message);
     }

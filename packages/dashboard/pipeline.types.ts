@@ -41,7 +41,10 @@ export interface PipelineRunDetails {
   nodes: PipelineNodeSnapshot[];
 }
 
-export interface PipelineRunReader {
-  listRuns(limit?: number): Promise<PipelineRunSummary[]>;
-  getRun(runId: string): Promise<PipelineRunDetails | null>;
+export interface PipelineRunsResponse {
+  runs: PipelineRunSummary[];
+}
+
+export interface PipelineErrorResponse {
+  error: string;
 }

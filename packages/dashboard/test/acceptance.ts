@@ -189,6 +189,11 @@ assert.equal(
   'text/javascript; charset=utf-8',
 );
 const scriptSource = await scriptResponse.text();
+assert.doesNotMatch(
+  scriptSource,
+  /pipeline\.types|Pipeline(?:ErrorResponse|NodeSnapshot|RunDetails|RunsResponse|RunSummary)/,
+  'host-compiled browser JavaScript must erase the shared DTO import',
+);
 assert.match(
   scriptSource,
   /`\$\{pipelineName\}\\(?:0|u0000)\$\{stepName\}`/,

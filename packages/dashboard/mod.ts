@@ -1,6 +1,11 @@
 import type { BullBoardExtension } from 'bull-board-docker/extensions';
 import type { Request, Response } from 'express';
 import { parsePipelineDashboardOptions } from './pipeline-dashboard.options.ts';
+import type {
+  PipelineErrorResponse,
+  PipelineRunDetails,
+  PipelineRunsResponse,
+} from './pipeline.types.ts';
 import dashboardHtml from './public/index.html' with { type: 'text' };
 import { PipelineRunRepository } from './pipeline-run.repository.ts';
 
@@ -13,14 +18,17 @@ const extension: BullBoardExtension = {
 
     context.router.get(
       '/api/pipelines',
-      async (_request: Request, response: Response) => {
+      async (_request: Request, response: Response<PipelineRunsResponse>) => {
         response.json({ runs: await repository.listRuns() });
       },
     );
 
     context.router.get(
       '/api/pipelines/:runId',
-      async (request: Request, response: Response) => {
+      async (
+        request: Request,
+        response: Response<PipelineRunDetails | PipelineErrorResponse>,
+      ) => {
         const details = await repository.getRun(request.params.runId);
         if (!details) {
           response.status(404).json({
