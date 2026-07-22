@@ -9,16 +9,28 @@ const jobFixtures = [
     nodeId: 'report-node',
     queueName: 'pipeline--social-analysis-report--report-work',
     jobId: 'report-job',
+    status: 'COMPLETED',
+    attempt: 'Attempt 1/1',
+    progress: ['records: 24'],
+    error: null,
   },
   {
     nodeId: 'trend-node',
     queueName: 'pipeline--social-analysis-trend--generate-trend',
     jobId: 'trend-job',
+    status: 'COMPLETED',
+    attempt: 'Attempt 2/3',
+    progress: ['records: 12'],
+    error: null,
   },
   {
     nodeId: 'crawl-node',
     queueName: 'pipeline--social-analysis-crawl--crawl-source',
     jobId: 'crawl-job',
+    status: 'FAILED',
+    attempt: 'Attempt 3/3',
+    progress: ['pages: 4'],
+    error: 'provider failed',
   },
 ];
 
@@ -52,12 +64,30 @@ try {
 
   listRequestTimes = [];
   await openList(page);
-  const listSnapshot = await page.$eval('.runs-table', (table) => ({
-    rows: table.querySelectorAll('tbody tr').length,
-    text: table.textContent || '',
-  }));
+  const listSnapshot = await page.$eval('.runs-table', (table) => {
+    const rows = [...table.querySelectorAll('tbody tr')];
+    const selectedRun = rows.find((row) =>
+      row.querySelector('code')?.textContent?.trim() === 'dashboard-e2e-run'
+    );
+    const status = selectedRun?.querySelector('.status');
+    return {
+      rows: rows.length,
+      selectedStatus: status
+        ? {
+          text: status.textContent?.trim(),
+          value: status.dataset.status,
+        }
+        : null,
+      text: table.textContent || '',
+    };
+  });
   assert.ok(listSnapshot.rows > 0, 'the real run list must render rows');
   assert.match(listSnapshot.text, /dashboard-e2e-run/);
+  assert.deepEqual(
+    listSnapshot.selectedStatus,
+    { text: 'RUNNING', value: 'RUNNING' },
+    'the selected run must render its RUNNING status badge',
+  );
 
   await waitFor(
     () => listRequestTimes.length >= 2,
@@ -95,6 +125,28 @@ try {
   assert.deepEqual(detailCounts, { connectors: 2, nodes: 3 });
 
   for (const fixture of jobFixtures) {
+    const nodeSnapshot = await page.$eval(
+      `[data-node-id="${fixture.nodeId}"]`,
+      (node) => ({
+        attempt: node.querySelector('.node-meta span')?.textContent?.trim(),
+        error: node.querySelector('.node-error')?.textContent?.trim() ?? null,
+        progress: [...node.querySelectorAll('.progress span')].map((entry) =>
+          entry.textContent?.trim()
+        ),
+        status: node.dataset.status,
+      }),
+    );
+    assert.deepEqual(
+      nodeSnapshot,
+      {
+        attempt: fixture.attempt,
+        error: fixture.error,
+        progress: fixture.progress,
+        status: fixture.status,
+      },
+      `${fixture.nodeId} must render its real status, attempt, progress, and error`,
+    );
+
     const expectedJobUrl = jobUrl(fixture.queueName, fixture.jobId);
     const renderedJobUrl = await page.$eval(
       `[data-node-id="${fixture.nodeId}"] .job-link`,
@@ -115,16 +167,46 @@ try {
     jobFixtures[0].queueName,
     jobFixtures[0].jobId,
   );
+  const expectedJobApiPath = jobApiPath(
+    jobFixtures[0].queueName,
+    jobFixtures[0].jobId,
+  );
+  const jobApiResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'GET' &&
+    new URL(response.url()).pathname === expectedJobApiPath
+  );
   const jobResponse = await clickSelectorAndWaitForNavigation(
     page,
     '[data-node-id="report-node"] .job-link',
   );
+  const jobApiResponse = await jobApiResponsePromise;
   assert.equal(
     jobResponse?.status(),
     200,
     'the real BullMQ job page must open',
   );
+  assert.equal(
+    jobApiResponse.status(),
+    200,
+    `the job-specific Bull Board API must succeed: ${expectedJobApiPath}`,
+  );
   assert.equal(page.url(), expectedJobUrl);
+  await page.waitForFunction(
+    ({ queueName, jobId }) => {
+      const text = document.body.textContent || '';
+      return text.includes(queueName) && text.includes(jobId);
+    },
+    { timeout: 10_000 },
+    jobFixtures[0],
+  );
+  const jobPageText = await page.$eval('body', (body) => body.textContent || '');
+  assert.match(jobPageText, new RegExp(escapeRegex(jobFixtures[0].queueName)));
+  assert.match(jobPageText, new RegExp(escapeRegex(jobFixtures[0].jobId)));
+  assert.doesNotMatch(
+    jobPageText,
+    /job not found|failed to load (?:the )?job|unable to (?:find|load) (?:the )?job|loading job/i,
+    'the rendered job page must not remain in a loading or not-found state',
+  );
 
   await page.goto(`${extensionBase}/?runId=dashboard-stress-run`, {
     waitUntil: 'domcontentloaded',
@@ -276,6 +358,16 @@ function jobUrl(queueName, jobId) {
   return `${bullBoardBase}/queue/${encodeURIComponent(queueName)}/${
     encodeURIComponent(jobId)
   }`;
+}
+
+function jobApiPath(queueName, jobId) {
+  return `${new URL(bullBoardBase).pathname}/api/queues/${
+    encodeURIComponent(queueName)
+  }/${encodeURIComponent(jobId)}`;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function login(page) {
