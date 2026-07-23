@@ -247,9 +247,8 @@ assert.doesNotMatch(
 assert.ok(
   /element\(["']button["'],\s*["']refresh-button["'],\s*["']Refresh["']\)/
     .test(scriptSource) &&
-    scriptSource.includes('captureViewportPosition()') &&
-    scriptSource.includes('restoreViewportPosition(viewportPosition)'),
-  'manual refresh must be explicit and preserve the inspected graph position',
+    scriptSource.includes('globalThis.location.reload();'),
+  'manual refresh must explicitly reload the current dashboard page',
 );
 assert.match(
   scriptSource,

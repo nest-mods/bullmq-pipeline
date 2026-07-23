@@ -292,11 +292,6 @@ code {
   outline: none;
 }
 
-.refresh-button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
 .summary-item {
   min-height: 29px;
   border: 1px solid var(--separator);

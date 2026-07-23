@@ -50,7 +50,7 @@ BULL_BOARD_EXTENSIONS='["https://raw.githubusercontent.com/nest-mods/bullmq-pipe
 - Authentication is inherited from the Bull Board host. Page, API, asset, and
   job URLs also retain a configured Bull Board proxy path.
 - Run data refreshes only when the page opens or the user selects **Refresh**.
-  Detail refreshes preserve the graph's current scroll position.
+  Refresh reloads the current list or run page from its initial position.
 - Node cards use distinct pending, running, retrying, completed, and failed
   state treatments so large runs remain scannable.
 

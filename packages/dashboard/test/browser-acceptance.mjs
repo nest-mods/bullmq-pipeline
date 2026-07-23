@@ -106,16 +106,18 @@ try {
     1,
     'the run list must remain stable until the user requests fresh data',
   );
-  await page.waitForFunction(() => {
-    const button = document.querySelector('.refresh-button');
-    return button instanceof HTMLButtonElement && !button.disabled;
-  });
-  await page.click('.refresh-button');
+  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
   await waitFor(
-    () => listRequestTimes.length === 2,
+    () => listRequestTimes.length >= 2,
     3_000,
     'a list API request from the manual refresh button',
   );
+  assert.equal(
+    listRequestTimes.length,
+    2,
+    'one manual refresh must issue one new list API request',
+  );
+  await page.waitForSelector('.runs-table');
   assert.match(
     await page.$eval('.last-updated', (element) => element.textContent || ''),
     /^Updated /,
@@ -327,7 +329,7 @@ try {
     'pending and completed badges must be visually distinct',
   );
 
-  const preservedScroll = await page.$eval(
+  const scrolledDistance = await page.$eval(
     '[data-testid="pipeline-graph"]',
     (viewport) => {
       viewport.scrollLeft = Math.min(
@@ -338,24 +340,15 @@ try {
     },
   );
   assert.ok(
-    preservedScroll > 0,
+    scrolledDistance > 0,
     'the stress graph must be horizontally scrollable',
   );
-  const stressRefresh = page.waitForResponse((response) =>
-    response.request().method() === 'GET' &&
-    new URL(response.url()).pathname.endsWith(
-      '/api/pipelines/dashboard-stress-run',
-    )
-  );
-  await page.click('.refresh-button');
-  await stressRefresh;
+  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
   await page.waitForFunction(
-    (expected) => {
+    () => {
       const viewport = document.querySelector('[data-testid="pipeline-graph"]');
-      return viewport && Math.abs(viewport.scrollLeft - expected) <= 2;
+      return viewport && viewport.scrollLeft === 0;
     },
-    {},
-    preservedScroll,
   );
 
   await page.setViewport({ width: 390, height: 844 });
@@ -422,8 +415,11 @@ try {
 
   listRequestTimes = [];
   await openList(page);
-  const initialRequestAt = listRequestTimes.at(-1);
-  assert.ok(initialRequestAt, 'list page must issue its initial API request');
+  assert.equal(
+    listRequestTimes.length,
+    1,
+    'list page must issue its initial API request',
+  );
   const loginNavigation = page.waitForNavigation({
     timeout: 10_000,
     waitUntil: 'domcontentloaded',
@@ -446,7 +442,6 @@ try {
     '/app/bull-board/login',
     'manual refresh after session invalidation must navigate to the proxied login',
   );
-  assert.ok(listRequestTimes.at(-1) >= initialRequestAt);
   assert.deepEqual(
     browserErrors,
     [],

@@ -28,7 +28,6 @@ interface PipelineGraphColumn {
   const nodeElements = new Map<string, HTMLElement>();
   let resizeObserver: ResizeObserver | undefined;
   let redrawEdges: (() => void) | undefined;
-  let loading = false;
   let lastUpdatedAt: number | null = null;
 
   globalThis.addEventListener('resize', () => redrawEdges?.(), {
@@ -82,10 +81,9 @@ interface PipelineGraphColumn {
     );
     const button = element('button', 'refresh-button', 'Refresh');
     button.type = 'button';
-    button.disabled = loading;
     button.title = 'Refresh pipeline data';
     button.addEventListener('click', () => {
-      void loadPipelineDashboard(true);
+      globalThis.location.reload();
     });
     append(control, updated, button);
     return control;
@@ -480,41 +478,7 @@ interface PipelineGraphColumn {
     root!.replaceChildren(section);
   }
 
-  function captureViewportPosition(): { left: number; top: number } | null {
-    const viewport = root!.querySelector<HTMLElement>(
-      '[data-testid="pipeline-graph"]',
-    );
-    return viewport
-      ? { left: viewport.scrollLeft, top: viewport.scrollTop }
-      : null;
-  }
-
-  function restoreViewportPosition(
-    position: { left: number; top: number } | null,
-  ): void {
-    if (!position) return;
-    requestAnimationFrame(() => {
-      const viewport = root!.querySelector<HTMLElement>(
-        '[data-testid="pipeline-graph"]',
-      );
-      viewport?.scrollTo(position.left, position.top);
-    });
-  }
-
-  function updateRefreshButton(): void {
-    const button = root!.querySelector<HTMLButtonElement>('.refresh-button');
-    if (button) button.disabled = loading;
-  }
-
-  async function loadPipelineDashboard(
-    preserveViewport = false,
-  ): Promise<void> {
-    if (loading) return;
-    const viewportPosition = preserveViewport
-      ? captureViewportPosition()
-      : null;
-    loading = true;
-    updateRefreshButton();
+  async function loadPipelineDashboard(): Promise<void> {
     try {
       if (runId) {
         const details = await requestJson<PipelineRunDetails>(
@@ -522,9 +486,7 @@ interface PipelineGraphColumn {
         );
         if (details) {
           lastUpdatedAt = Date.now();
-          loading = false;
           renderRun(details);
-          restoreViewportPosition(viewportPosition);
         }
       } else {
         const response = await requestJson<PipelineRunsResponse>(
@@ -532,16 +494,11 @@ interface PipelineGraphColumn {
         );
         if (response) {
           lastUpdatedAt = Date.now();
-          loading = false;
           renderRuns(response.runs || []);
         }
       }
     } catch (error) {
-      loading = false;
       renderError(error);
-    } finally {
-      loading = false;
-      updateRefreshButton();
     }
   }
 
