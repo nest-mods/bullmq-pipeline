@@ -10,8 +10,7 @@ const jobFixtures = [
     queueName: 'pipeline--social-analysis-report--report-work',
     jobId: 'report-job',
     status: 'COMPLETED',
-    attempt: 'Attempt 1/1',
-    progress: ['records: 24'],
+    attempt: null,
     error: null,
   },
   {
@@ -20,7 +19,6 @@ const jobFixtures = [
     jobId: 'trend-job',
     status: 'COMPLETED',
     attempt: 'Attempt 2/3',
-    progress: ['records: 12'],
     error: null,
   },
   {
@@ -29,7 +27,6 @@ const jobFixtures = [
     jobId: 'crawl-job',
     status: 'FAILED',
     attempt: 'Attempt 3/3',
-    progress: ['pages: 4'],
     error: 'provider failed',
   },
 ];
@@ -67,10 +64,14 @@ try {
   const listSnapshot = await page.$eval('.runs-table', (table) => {
     const rows = [...table.querySelectorAll('tbody tr')];
     const selectedRun = rows.find((row) =>
-      row.querySelector('code')?.textContent?.trim() === 'dashboard-e2e-run'
+      row.querySelector('.pipeline-link')?.textContent?.trim() ===
+        'social-analysis-report'
     );
     const status = selectedRun?.querySelector('.status');
     return {
+      headers: [...table.querySelectorAll('thead th')].map((heading) =>
+        heading.textContent?.trim()
+      ),
       rows: rows.length,
       selectedStatus: status
         ? {
@@ -82,7 +83,17 @@ try {
     };
   });
   assert.ok(listSnapshot.rows > 0, 'the real run list must render rows');
-  assert.match(listSnapshot.text, /dashboard-e2e-run/);
+  assert.deepEqual(listSnapshot.headers, [
+    'Pipeline',
+    'Status',
+    'Pending / Failed',
+    'Updated',
+  ]);
+  assert.doesNotMatch(
+    listSnapshot.text,
+    /dashboard-e2e-run/,
+    'the run list must not expose internal run IDs',
+  );
   assert.deepEqual(
     listSnapshot.selectedStatus,
     { text: 'RUNNING', value: 'RUNNING' },
@@ -123,16 +134,42 @@ try {
     }),
   );
   assert.deepEqual(detailCounts, { connectors: 2, nodes: 3 });
+  const graphText = await page.$eval(
+    '[data-testid="pipeline-graph"]',
+    (graph) => graph.textContent || '',
+  );
+  assert.doesNotMatch(graphText, /report-node|trend-node|crawl-node/);
+  assert.doesNotMatch(graphText, /invocation|scope|parent|records:|pages:/i);
+  assert.equal(
+    await page.$$eval(
+      '.step-index, .scope-meta, .progress',
+      (elements) => elements.length,
+    ),
+    0,
+  );
+  const stepSubtitles = await page.$$eval(
+    '.step-header p',
+    (elements) => elements.map((element) => element.textContent?.trim()),
+  );
+  assert.deepEqual(stepSubtitles, [
+    'social-analysis-report',
+    'social-analysis-trend',
+    'social-analysis-crawl',
+  ]);
 
   for (const fixture of jobFixtures) {
     const nodeSnapshot = await page.$eval(
       `[data-node-id="${fixture.nodeId}"]`,
       (node) => ({
-        attempt: node.querySelector('.node-meta span')?.textContent?.trim(),
+        attempt: node.querySelector('.node-meta')?.textContent?.trim() ?? null,
         error: node.querySelector('.node-error')?.textContent?.trim() ?? null,
-        progress: [...node.querySelectorAll('.progress span')].map((entry) =>
-          entry.textContent?.trim()
+        jobId: node.querySelector('.job-reference code')?.textContent?.trim(),
+        jobTitle: node.querySelector('.job-reference')?.getAttribute('title'),
+        copyLabel: node.querySelector('.copy-job-id')?.getAttribute(
+          'aria-label',
         ),
+        copyTitle: node.querySelector('.copy-job-id')?.getAttribute('title'),
+        jobLabel: node.querySelector('.job-link')?.textContent?.trim(),
         status: node.dataset.status,
       }),
     );
@@ -141,10 +178,14 @@ try {
       {
         attempt: fixture.attempt,
         error: fixture.error,
-        progress: fixture.progress,
+        jobId: fixture.jobId,
+        jobTitle: `Job ID: ${fixture.jobId}`,
+        copyLabel: 'Copy Job ID',
+        copyTitle: 'Copy Job ID',
+        jobLabel: 'View job',
         status: fixture.status,
       },
-      `${fixture.nodeId} must render its real status, attempt, progress, and error`,
+      `${fixture.nodeId} must render only its operational status, retry, error, and job link`,
     );
 
     const expectedJobUrl = jobUrl(fixture.queueName, fixture.jobId);
@@ -199,7 +240,10 @@ try {
     { timeout: 10_000 },
     jobFixtures[0],
   );
-  const jobPageText = await page.$eval('body', (body) => body.textContent || '');
+  const jobPageText = await page.$eval(
+    'body',
+    (body) => body.textContent || '',
+  );
   assert.match(jobPageText, new RegExp(escapeRegex(jobFixtures[0].queueName)));
   assert.match(jobPageText, new RegExp(escapeRegex(jobFixtures[0].jobId)));
   assert.doesNotMatch(
@@ -225,15 +269,29 @@ try {
       const rectangle = element.getBoundingClientRect();
       return {
         connectors: element.querySelectorAll('.connector').length,
+        executionLabels: element.querySelectorAll('.execution-label').length,
         nodes: element.querySelectorAll('.node').length,
+        stepSubtitles: [...element.querySelectorAll('.step-header p')].map(
+          (subtitle) => subtitle.textContent?.trim(),
+        ),
         width: rectangle.width,
         height: rectangle.height,
       };
     },
   );
   assert.deepEqual(
-    { connectors: graph.connectors, nodes: graph.nodes },
-    { connectors: 180, nodes: 200 },
+    {
+      connectors: graph.connectors,
+      executionLabels: graph.executionLabels,
+      nodes: graph.nodes,
+    },
+    { connectors: 180, executionLabels: 200, nodes: 200 },
+  );
+  assert.ok(
+    graph.stepSubtitles.every((subtitle) =>
+      subtitle === 'stress-pipeline · 20 executions'
+    ),
+    `stress groups must explain repeated step executions: ${graph.stepSubtitles}`,
   );
   assert.ok(
     graph.width > 0 && graph.height > 0,
