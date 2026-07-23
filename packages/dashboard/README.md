@@ -49,6 +49,10 @@ BULL_BOARD_EXTENSIONS='["https://raw.githubusercontent.com/nest-mods/bullmq-pipe
   `/queue/{queueName}/{jobId}`, with both path segments encoded.
 - Authentication is inherited from the Bull Board host. Page, API, asset, and
   job URLs also retain a configured Bull Board proxy path.
+- Run data refreshes only when the page opens or the user selects **Refresh**.
+  Detail refreshes preserve the graph's current scroll position.
+- Node cards use distinct pending, running, retrying, completed, and failed
+  state treatments so large runs remain scannable.
 
 ## Redis Data And Cleanup
 
@@ -82,7 +86,7 @@ real disposable Docker acceptance path. It starts `diluka/bull-board:next`,
 Redis, and Nginx with authentication enabled, mounts the local extension, and
 creates real BullMQ jobs covering completion, retry-then-completion, and
 exhausted retries. A fixed `ghcr.io/puppeteer/puppeteer:24.16.0` image
-automatically runs Chromium through login, polling, detail/job navigation,
-responsive media modes, and session expiry. The suite also verifies proxied
-APIs, job states, and TypeScript-based Redis cleanup assertions without snapshot
-deletion, then removes the Docker fixtures afterward.
+automatically runs Chromium through login, manual refresh, detail/job
+navigation, responsive media modes, and session expiry. The suite also verifies
+proxied APIs, job states, and TypeScript-based Redis cleanup assertions without
+snapshot deletion, then removes the Docker fixtures afterward.

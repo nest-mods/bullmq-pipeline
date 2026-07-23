@@ -28,6 +28,8 @@ interface PipelineGraphColumn {
   const nodeElements = new Map<string, HTMLElement>();
   let resizeObserver: ResizeObserver | undefined;
   let redrawEdges: (() => void) | undefined;
+  let loading = false;
+  let lastUpdatedAt: number | null = null;
 
   globalThis.addEventListener('resize', () => redrawEdges?.(), {
     passive: true,
@@ -67,6 +69,30 @@ interface PipelineGraphColumn {
 
   function formatTime(value: number | null): string {
     return value ? new Date(value).toLocaleString() : '-';
+  }
+
+  function refreshControl(): HTMLDivElement {
+    const control = element('div', 'refresh-control');
+    const updated = element(
+      'span',
+      'last-updated',
+      lastUpdatedAt
+        ? `Updated ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+        : 'Not refreshed yet',
+    );
+    const button = element('button', 'refresh-button', 'Refresh');
+    button.type = 'button';
+    button.disabled = loading;
+    button.title = 'Refresh pipeline data';
+    button.addEventListener('click', () => {
+      void loadPipelineDashboard(true);
+    });
+    append(control, updated, button);
+    return control;
+  }
+
+  function pageActions(primary: HTMLElement): HTMLDivElement {
+    return append(element('div', 'page-actions'), primary, refreshControl());
   }
 
   function extensionUrl(pathname: string): URL {
@@ -129,13 +155,17 @@ interface PipelineGraphColumn {
   }
 
   function renderError(error: unknown): void {
-    root!.replaceChildren(
+    const page = element('section', 'page');
+    append(
+      page,
+      pageActions(element('span', 'run-count', 'Pipeline data unavailable')),
       element(
         'div',
         'error',
         error instanceof Error ? error.message : String(error),
       ),
     );
+    root!.replaceChildren(page);
   }
 
   function renderRuns(runs: PipelineRunSummary[]): void {
@@ -147,7 +177,11 @@ interface PipelineGraphColumn {
       element('p', 'eyebrow', 'Last 24 hours'),
       element('h1', '', 'Pipeline runs'),
     );
-    append(header, title, element('span', 'run-count', `${runs.length} runs`));
+    append(
+      header,
+      title,
+      pageActions(element('span', 'run-count', `${runs.length} runs`)),
+    );
     section.append(header);
 
     if (runs.length === 0) {
@@ -434,7 +468,7 @@ interface PipelineGraphColumn {
       element('span', 'summary-item', `${nodes.length} executions`),
       statusBadge(run.status),
     );
-    append(header, title, summary);
+    append(header, title, pageActions(summary));
     section.append(header);
 
     if (run.error) section.append(element('div', 'run-error', run.error));
@@ -446,39 +480,67 @@ interface PipelineGraphColumn {
     root!.replaceChildren(section);
   }
 
-  async function loadPipelineDashboard(): Promise<void> {
+  function captureViewportPosition(): { left: number; top: number } | null {
+    const viewport = root!.querySelector<HTMLElement>(
+      '[data-testid="pipeline-graph"]',
+    );
+    return viewport
+      ? { left: viewport.scrollLeft, top: viewport.scrollTop }
+      : null;
+  }
+
+  function restoreViewportPosition(
+    position: { left: number; top: number } | null,
+  ): void {
+    if (!position) return;
+    requestAnimationFrame(() => {
+      const viewport = root!.querySelector<HTMLElement>(
+        '[data-testid="pipeline-graph"]',
+      );
+      viewport?.scrollTo(position.left, position.top);
+    });
+  }
+
+  function updateRefreshButton(): void {
+    const button = root!.querySelector<HTMLButtonElement>('.refresh-button');
+    if (button) button.disabled = loading;
+  }
+
+  async function loadPipelineDashboard(
+    preserveViewport = false,
+  ): Promise<void> {
+    if (loading) return;
+    const viewportPosition = preserveViewport
+      ? captureViewportPosition()
+      : null;
+    loading = true;
+    updateRefreshButton();
     try {
       if (runId) {
         const details = await requestJson<PipelineRunDetails>(
           `/api/pipelines/${encodeURIComponent(runId)}`,
         );
-        if (details) renderRun(details);
+        if (details) {
+          lastUpdatedAt = Date.now();
+          renderRun(details);
+          restoreViewportPosition(viewportPosition);
+        }
       } else {
         const response = await requestJson<PipelineRunsResponse>(
           '/api/pipelines',
         );
-        if (response) renderRuns(response.runs || []);
+        if (response) {
+          lastUpdatedAt = Date.now();
+          renderRuns(response.runs || []);
+        }
       }
     } catch (error) {
       renderError(error);
-    }
-  }
-
-  function pollingInterval(): number {
-    try {
-      const settings = JSON.parse(
-        localStorage.getItem('board-settings') || '{}',
-      ) as { state?: { pollingInterval?: unknown } };
-      const value = Number(settings?.state?.pollingInterval);
-      return Number.isFinite(value) ? value : 5;
-    } catch {
-      return 5;
+    } finally {
+      loading = false;
+      updateRefreshButton();
     }
   }
 
   loadPipelineDashboard();
-  const interval = pollingInterval();
-  if (interval > 0) {
-    globalThis.setInterval(loadPipelineDashboard, interval * 1_000);
-  }
 })();
