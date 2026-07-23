@@ -19,3 +19,4 @@ jobs:
           deno-version: v2.9.3
       - run: deno install --frozen
       - run: deno task check
+      - run: deno task test:dashboard

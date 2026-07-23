@@ -1,0 +1,193 @@
+services:
+  redis:
+    image: redis:alpine
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  seed:
+    image: denoland/deno:alpine-2.9.3
+    working_dir: /workspace/packages/dashboard
+    entrypoint: deno
+    command:
+      - run
+      - --frozen
+      - --lock=/workspace/deno.lock
+      - --config=/workspace/deno.json
+      - --allow-env
+      - --allow-net
+      - /workspace/packages/dashboard/test/seed.ts
+    environment:
+      REDIS_HOST: redis
+      PIPELINE_KEY_PREFIX: 'test:'
+    volumes:
+      - deno-cache:/deno-dir
+      - type: bind
+        source: ../../../deno.json
+        target: /workspace/deno.json
+        read_only: true
+      - type: bind
+        source: ../../../deno.lock
+        target: /workspace/deno.lock
+        read_only: true
+      - type: bind
+        source: ../deno.json
+        target: /workspace/packages/dashboard/deno.json
+        read_only: true
+      - type: bind
+        source: ./seed.ts
+        target: /workspace/packages/dashboard/test/seed.ts
+        read_only: true
+      - type: bind
+        source: ./resource-lifecycle.ts
+        target: /workspace/packages/dashboard/test/resource-lifecycle.ts
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  bull-board:
+    image: diluka/bull-board:next
+    pull_policy: always
+    environment:
+      REDIS_HOST: redis
+      PROXY_PATH: /app/bull-board
+      PORT: 80
+      USER_LOGIN: test-user
+      USER_PASSWORD: test-password
+      BULL_BOARD_EXTENSIONS: '[{"specifier":"/extensions/pipeline-dashboard","options":{"keyPrefix":"test:"}}]'
+    volumes:
+      - type: bind
+        source: ..
+        target: /extensions/pipeline-dashboard
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - '127.0.0.1::80'
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+    depends_on:
+      bull-board:
+        condition: service_started
+
+  acceptance:
+    image: denoland/deno:alpine-2.9.3
+    entrypoint: deno
+    command: [run, --allow-env, --allow-net, /test/acceptance.ts]
+    volumes:
+      - type: bind
+        source: ./acceptance.ts
+        target: /test/acceptance.ts
+        read_only: true
+    depends_on:
+      nginx:
+        condition: service_started
+
+  browser-acceptance:
+    image: ghcr.io/puppeteer/puppeteer:24.16.0
+    working_dir: /home/pptruser
+    init: true
+    cap_add:
+      - SYS_ADMIN
+    entrypoint: [docker-entrypoint.sh]
+    command: [node, /home/pptruser/browser-acceptance.mjs]
+    volumes:
+      - type: bind
+        source: ./browser-acceptance.mjs
+        target: /home/pptruser/browser-acceptance.mjs
+        read_only: true
+    depends_on:
+      nginx:
+        condition: service_started
+
+  bullmq-assertion:
+    image: denoland/deno:alpine-2.9.3
+    working_dir: /workspace/packages/dashboard
+    entrypoint: deno
+    command:
+      - run
+      - --frozen
+      - --lock=/workspace/deno.lock
+      - --config=/workspace/deno.json
+      - --allow-env
+      - --allow-net
+      - /workspace/packages/dashboard/test/assert-bullmq.ts
+    environment:
+      REDIS_HOST: redis
+    volumes:
+      - deno-cache:/deno-dir
+      - type: bind
+        source: ../../../deno.json
+        target: /workspace/deno.json
+        read_only: true
+      - type: bind
+        source: ../../../deno.lock
+        target: /workspace/deno.lock
+        read_only: true
+      - type: bind
+        source: ../deno.json
+        target: /workspace/packages/dashboard/deno.json
+        read_only: true
+      - type: bind
+        source: ./assert-bullmq.ts
+        target: /workspace/packages/dashboard/test/assert-bullmq.ts
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis-assertion:
+    image: denoland/deno:alpine-2.9.3
+    working_dir: /workspace/packages/dashboard
+    entrypoint: deno
+    command:
+      - run
+      - --frozen
+      - --lock=/workspace/deno.lock
+      - --config=/workspace/deno.json
+      - --allow-env
+      - --allow-net
+      - /workspace/packages/dashboard/test/assert-redis-cleanup.ts
+    environment:
+      REDIS_HOST: redis
+      PIPELINE_KEY_PREFIX: 'test:'
+    volumes:
+      - deno-cache:/deno-dir
+      - type: bind
+        source: ../../../deno.json
+        target: /workspace/deno.json
+        read_only: true
+      - type: bind
+        source: ../../../deno.lock
+        target: /workspace/deno.lock
+        read_only: true
+      - type: bind
+        source: ../deno.json
+        target: /workspace/packages/dashboard/deno.json
+        read_only: true
+      - type: bind
+        source: ./assert-redis-cleanup.ts
+        target: /workspace/packages/dashboard/test/assert-redis-cleanup.ts
+        read_only: true
+      - type: bind
+        source: ./resource-lifecycle.ts
+        target: /workspace/packages/dashboard/test/resource-lifecycle.ts
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  deno-cache:

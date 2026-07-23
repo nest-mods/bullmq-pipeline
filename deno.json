@@ -4,7 +4,8 @@
   ],
   "nodeModulesDir": "auto",
   "tasks": {
-    "check": "deno fmt --check && deno lint && deno check --all packages/pipeline/src/index.ts packages/dashboard/mod.ts"
+    "check": "deno fmt --check && deno lint && deno check --all packages/pipeline/src/index.ts packages/dashboard/pipeline.types.ts packages/dashboard/pipeline-dashboard.options.ts packages/dashboard/pipeline-run.repository.ts packages/dashboard/*.test.ts packages/dashboard/test/*.ts && deno check packages/dashboard/mod.ts && deno check --config packages/dashboard/public/deno.json packages/dashboard/public/pipeline-dashboard.ts",
+    "test:dashboard": "deno test -A packages/dashboard/*.test.ts packages/dashboard/test/resource-lifecycle.test.ts packages/dashboard/test/docker-runner.test.ts && deno run -A packages/dashboard/test/docker.ts"
   },
   "fmt": {
     "singleQuote": true,
