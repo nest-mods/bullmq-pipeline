@@ -86,6 +86,25 @@ interface PipelineGraphColumn {
     ).href;
   }
 
+  function copyJobIdButton(jobId: string): HTMLButtonElement {
+    const button = element('button', 'copy-job-id');
+    button.type = 'button';
+    button.title = 'Copy Job ID';
+    button.setAttribute('aria-label', 'Copy Job ID');
+    button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(jobId);
+      button.dataset.copied = 'true';
+      button.title = 'Copied';
+      button.setAttribute('aria-label', 'Job ID copied');
+      globalThis.setTimeout(() => {
+        delete button.dataset.copied;
+        button.title = 'Copy Job ID';
+        button.setAttribute('aria-label', 'Copy Job ID');
+      }, 1_200);
+    });
+    return button;
+  }
+
   async function requestJson<T>(pathname: string): Promise<T | null> {
     const response = await fetch(extensionUrl(pathname), {
       headers: { Accept: 'application/json' },
@@ -143,7 +162,7 @@ interface PipelineGraphColumn {
     const table = element('table', 'runs-table');
     const head = element('thead');
     const headingRow = element('tr');
-    ['Pipeline', 'Run', 'Status', 'Tasks', 'Updated'].forEach((label) =>
+    ['Pipeline', 'Status', 'Pending / Failed', 'Updated'].forEach((label) =>
       headingRow.append(element('th', '', label))
     );
     head.append(headingRow);
@@ -156,20 +175,12 @@ interface PipelineGraphColumn {
       pipelineLink.href = pipelineRunPath(run.id);
       pipelineCell.append(pipelineLink);
 
-      const runCell = element('td');
-      append(
-        runCell,
-        element('div', 'run-name', run.name),
-        element('code', '', run.id),
-      );
-
       const statusCell = element('td');
       statusCell.append(statusBadge(run.status));
 
       append(
         row,
         pipelineCell,
-        runCell,
         statusCell,
         element(
           'td',
@@ -229,68 +240,52 @@ interface PipelineGraphColumn {
       .map(([depth, groups]) => ({ depth, groups: [...groups.values()] }));
   }
 
-  function nodeCard(node: PipelineNodeSnapshot): HTMLElement {
+  function nodeCard(
+    node: PipelineNodeSnapshot,
+    executionIndex?: number,
+  ): HTMLElement {
     const card = element('article', 'node');
-    card.dataset.status = normalizeStatus(node.status);
+    const status = normalizeStatus(node.status);
+    card.dataset.status = status;
     card.dataset.nodeId = node.id;
 
     const header = element('div', 'node-header');
-    const shortId = element('code', '', String(node.id).slice(0, 12));
-    shortId.title = node.id;
-    append(header, shortId, element('span', '', normalizeStatus(node.status)));
-
-    const meta = element('div', 'node-meta');
-    const parentCount = Array.isArray(node.parentNodeIds)
-      ? node.parentNodeIds.length
-      : 0;
-    append(
-      meta,
-      element('span', '', `Attempt ${node.attempt}/${node.maxAttempts}`),
-      element(
-        'span',
-        '',
-        `${parentCount} parent${parentCount === 1 ? '' : 's'}`,
-      ),
-    );
-    append(card, header, meta);
-
-    if (node.invocationId || node.scopeId) {
-      const scope = element('div', 'scope-meta');
-      if (node.invocationId) {
-        const invocation = element(
-          'code',
-          '',
-          `invocation ${node.invocationId}`,
-        );
-        invocation.title = node.invocationId;
-        scope.append(invocation);
-      }
-      if (node.scopeId) {
-        const scopeId = element('code', '', `scope ${node.scopeId}`);
-        scopeId.title = node.scopeId;
-        scope.append(scopeId);
-      }
-      card.append(scope);
+    if (executionIndex !== undefined) {
+      header.append(
+        element('span', 'execution-label', `Execution ${executionIndex}`),
+      );
     }
+    header.append(element('span', 'node-status', status));
+    card.append(header);
 
-    const progressEntries = Object.entries(node.progress || {});
-    if (progressEntries.length > 0) {
-      const progress = element('div', 'progress');
-      progressEntries.forEach(([key, value]) => {
-        const text = typeof value === 'object'
-          ? JSON.stringify(value)
-          : String(value);
-        progress.append(element('span', '', `${key}: ${text}`));
-      });
-      card.append(progress);
+    const attempt = Number(node.attempt);
+    if (status === 'FAILED' || status === 'RETRYING' || attempt > 1) {
+      card.append(
+        element(
+          'div',
+          'node-meta',
+          `Attempt ${node.attempt}/${node.maxAttempts}`,
+        ),
+      );
     }
 
     if (node.error) card.append(element('div', 'node-error', node.error));
 
     if (node.queueName && node.jobId) {
-      const link = element('a', 'job-link', 'Open BullMQ job');
+      const reference = element('div', 'job-reference');
+      reference.title = `Job ID: ${node.jobId}`;
+      append(
+        reference,
+        append(
+          element('div', 'job-reference-label'),
+          element('span', '', 'Job ID'),
+          copyJobIdButton(node.jobId),
+        ),
+        element('code', '', node.jobId),
+      );
+      const link = element('a', 'job-link', 'View job');
       link.href = jobPath(node.queueName, node.jobId);
-      card.append(link);
+      append(card, append(element('footer', 'node-footer'), reference, link));
     }
 
     return card;
@@ -369,9 +364,9 @@ interface PipelineGraphColumn {
     const connectors = createConnectors();
     const stages = element('div', 'stages');
 
-    layoutNodes(nodes).forEach((column, columnIndex) => {
+    layoutNodes(nodes).forEach((column) => {
       const stage = element('div', 'stage');
-      column.groups.forEach((group, groupIndex) => {
+      column.groups.forEach((group) => {
         const step = element('section', 'step');
         const header = element('header', 'step-header');
         const title = element('div');
@@ -381,28 +376,19 @@ interface PipelineGraphColumn {
           element(
             'p',
             '',
-            `${group.pipelineName} · ${group.nodes.length} task${
-              group.nodes.length === 1 ? '' : 's'
-            }`,
+            group.nodes.length === 1
+              ? group.pipelineName
+              : `${group.pipelineName} · ${group.nodes.length} executions`,
           ),
         );
-        append(
-          header,
-          element(
-            'span',
-            'step-index',
-            `${String(columnIndex + 1).padStart(2, '0')}.${
-              String(
-                groupIndex + 1,
-              ).padStart(2, '0')
-            }`,
-          ),
-          title,
-        );
+        header.append(title);
 
         const nodeList = element('div', 'nodes');
-        group.nodes.forEach((node) => {
-          const card = nodeCard(node);
+        group.nodes.forEach((node, nodeIndex) => {
+          const card = nodeCard(
+            node,
+            group.nodes.length > 1 ? nodeIndex + 1 : undefined,
+          );
           nodeElements.set(node.id, card);
           nodeList.append(card);
         });
@@ -438,14 +424,14 @@ interface PipelineGraphColumn {
       title,
       back,
       element('h1', '', run.pipelineName),
-      element('p', 'run-id', run.id),
+      element('p', 'run-id', `Run ID: ${run.id}`),
     );
 
     const summary = element('div', 'summary');
     append(
       summary,
       element('span', 'summary-item', `${run.pendingNodes} pending`),
-      element('span', 'summary-item', `${nodes.length} tasks`),
+      element('span', 'summary-item', `${nodes.length} executions`),
       statusBadge(run.status),
     );
     append(header, title, summary);
@@ -454,7 +440,7 @@ interface PipelineGraphColumn {
     if (run.error) section.append(element('div', 'run-error', run.error));
     section.append(
       nodes.length === 0
-        ? element('div', 'empty', 'Waiting for pipeline tasks.')
+        ? element('div', 'empty', 'Waiting for pipeline executions.')
         : pipelineGraph(nodes),
     );
     root!.replaceChildren(section);
