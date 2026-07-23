@@ -106,6 +106,10 @@ try {
     1,
     'the run list must remain stable until the user requests fresh data',
   );
+  await page.waitForFunction(() => {
+    const button = document.querySelector('.refresh-button');
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
   await page.click('.refresh-button');
   await waitFor(
     () => listRequestTimes.length === 2,

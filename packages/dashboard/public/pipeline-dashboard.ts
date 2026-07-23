@@ -522,6 +522,7 @@ interface PipelineGraphColumn {
         );
         if (details) {
           lastUpdatedAt = Date.now();
+          loading = false;
           renderRun(details);
           restoreViewportPosition(viewportPosition);
         }
@@ -531,10 +532,12 @@ interface PipelineGraphColumn {
         );
         if (response) {
           lastUpdatedAt = Date.now();
+          loading = false;
           renderRuns(response.runs || []);
         }
       }
     } catch (error) {
+      loading = false;
       renderError(error);
     } finally {
       loading = false;
