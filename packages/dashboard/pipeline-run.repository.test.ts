@@ -36,15 +36,19 @@ class RecordingRedis implements PipelineRedisClient {
   }
 }
 
-Deno.test('uses the unprefixed pipeline namespace by default', async () => {
+Deno.test('uses the pipeline namespace prefix by default', async () => {
   const redis = new RecordingRedis();
-  await assertRepositoryKeys('', new PipelineRunRepository(redis), redis);
+  await assertRepositoryKeys(
+    'pipeline',
+    new PipelineRunRepository(redis),
+    redis,
+  );
 });
 
-Deno.test('prepends a configured key prefix verbatim', async () => {
+Deno.test('uses the configured pipeline namespace prefix', async () => {
   const redis = new RecordingRedis();
-  const repository = new PipelineRunRepository(redis, { keyPrefix: 'tenant:' });
-  await assertRepositoryKeys('tenant:', repository, redis);
+  const repository = new PipelineRunRepository(redis, { prefix: 'tenant' });
+  await assertRepositoryKeys('tenant', repository, redis);
 });
 
 async function assertRepositoryKeys(
@@ -56,10 +60,10 @@ async function assertRepositoryKeys(
   await repository.getRun('run-1');
 
   assert.deepEqual(redis.calls, [
-    `zrevrange ${prefix}pipeline:runs 0 -1`,
-    `hgetall ${prefix}pipeline:run:run-1`,
-    `hgetall ${prefix}pipeline:run:run-1`,
-    `zrange ${prefix}pipeline:run:run-1:nodes 0 -1`,
-    `hgetall ${prefix}pipeline:run:run-1:node:node-1`,
+    `zrevrange ${prefix}:runs 0 -1`,
+    `hgetall ${prefix}:run:run-1`,
+    `hgetall ${prefix}:run:run-1`,
+    `zrange ${prefix}:run:run-1:nodes 0 -1`,
+    `hgetall ${prefix}:run:run-1:node:node-1`,
   ]);
 }

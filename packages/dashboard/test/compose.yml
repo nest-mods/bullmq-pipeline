@@ -21,7 +21,7 @@ services:
       - /workspace/packages/dashboard/test/seed.ts
     environment:
       REDIS_HOST: redis
-      PIPELINE_KEY_PREFIX: 'test:'
+      PIPELINE_PREFIX: test
     volumes:
       - deno-cache:/deno-dir
       - type: bind
@@ -57,7 +57,7 @@ services:
       PORT: 80
       USER_LOGIN: test-user
       USER_PASSWORD: test-password
-      BULL_BOARD_EXTENSIONS: '[{"specifier":"/extensions/pipeline-dashboard","options":{"keyPrefix":"test:"}}]'
+      BULL_BOARD_EXTENSIONS: '[{"specifier":"/extensions/pipeline-dashboard","options":{"prefix":"test"}}]'
     volumes:
       - type: bind
         source: ..
@@ -162,7 +162,7 @@ services:
       - /workspace/packages/dashboard/test/assert-redis-cleanup.ts
     environment:
       REDIS_HOST: redis
-      PIPELINE_KEY_PREFIX: 'test:'
+      PIPELINE_PREFIX: test
     volumes:
       - deno-cache:/deno-dir
       - type: bind

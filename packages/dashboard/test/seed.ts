@@ -7,7 +7,7 @@ import { withResourceScope } from './resource-lifecycle.ts';
 const reportQueueName = 'pipeline--social-analysis-report--report-work';
 const trendQueueName = 'pipeline--social-analysis-trend--generate-trend';
 const crawlQueueName = 'pipeline--social-analysis-crawl--crawl-source';
-const pipelineKeyRoot = `${Deno.env.get('PIPELINE_KEY_PREFIX') ?? ''}pipeline:`;
+const pipelineKeyRoot = `${Deno.env.get('PIPELINE_PREFIX') ?? 'pipeline'}:`;
 const pipelineRunsKey = `${pipelineKeyRoot}runs`;
 const connection = {
   host: Deno.env.get('REDIS_HOST') ?? 'redis',
