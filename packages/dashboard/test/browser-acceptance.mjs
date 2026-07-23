@@ -430,7 +430,13 @@ try {
   );
   assert.ok(sessionCookies.length > 0, 'login must create a session cookie');
   await page.deleteCookie(...sessionCookies);
-  await page.click('.refresh-button');
+  await page.evaluate(() => {
+    const button = document.querySelector('.refresh-button');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('Missing refresh button');
+    }
+    button.click();
+  });
   const loginResponse = await loginNavigation;
   assert.ok(loginResponse, 'session expiry must trigger a document navigation');
   assert.ok(
