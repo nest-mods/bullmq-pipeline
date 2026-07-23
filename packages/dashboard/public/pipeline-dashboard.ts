@@ -28,6 +28,7 @@ interface PipelineGraphColumn {
   const nodeElements = new Map<string, HTMLElement>();
   let resizeObserver: ResizeObserver | undefined;
   let redrawEdges: (() => void) | undefined;
+  let lastUpdatedAt: number | null = null;
 
   globalThis.addEventListener('resize', () => redrawEdges?.(), {
     passive: true,
@@ -67,6 +68,29 @@ interface PipelineGraphColumn {
 
   function formatTime(value: number | null): string {
     return value ? new Date(value).toLocaleString() : '-';
+  }
+
+  function refreshControl(): HTMLDivElement {
+    const control = element('div', 'refresh-control');
+    const updated = element(
+      'span',
+      'last-updated',
+      lastUpdatedAt
+        ? `Updated ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+        : 'Not refreshed yet',
+    );
+    const button = element('button', 'refresh-button', 'Refresh');
+    button.type = 'button';
+    button.title = 'Refresh pipeline data';
+    button.addEventListener('click', () => {
+      globalThis.location.reload();
+    });
+    append(control, updated, button);
+    return control;
+  }
+
+  function pageActions(primary: HTMLElement): HTMLDivElement {
+    return append(element('div', 'page-actions'), primary, refreshControl());
   }
 
   function extensionUrl(pathname: string): URL {
@@ -129,13 +153,17 @@ interface PipelineGraphColumn {
   }
 
   function renderError(error: unknown): void {
-    root!.replaceChildren(
+    const page = element('section', 'page');
+    append(
+      page,
+      pageActions(element('span', 'run-count', 'Pipeline data unavailable')),
       element(
         'div',
         'error',
         error instanceof Error ? error.message : String(error),
       ),
     );
+    root!.replaceChildren(page);
   }
 
   function renderRuns(runs: PipelineRunSummary[]): void {
@@ -147,7 +175,11 @@ interface PipelineGraphColumn {
       element('p', 'eyebrow', 'Last 24 hours'),
       element('h1', '', 'Pipeline runs'),
     );
-    append(header, title, element('span', 'run-count', `${runs.length} runs`));
+    append(
+      header,
+      title,
+      pageActions(element('span', 'run-count', `${runs.length} runs`)),
+    );
     section.append(header);
 
     if (runs.length === 0) {
@@ -434,7 +466,7 @@ interface PipelineGraphColumn {
       element('span', 'summary-item', `${nodes.length} executions`),
       statusBadge(run.status),
     );
-    append(header, title, summary);
+    append(header, title, pageActions(summary));
     section.append(header);
 
     if (run.error) section.append(element('div', 'run-error', run.error));
@@ -452,33 +484,23 @@ interface PipelineGraphColumn {
         const details = await requestJson<PipelineRunDetails>(
           `/api/pipelines/${encodeURIComponent(runId)}`,
         );
-        if (details) renderRun(details);
+        if (details) {
+          lastUpdatedAt = Date.now();
+          renderRun(details);
+        }
       } else {
         const response = await requestJson<PipelineRunsResponse>(
           '/api/pipelines',
         );
-        if (response) renderRuns(response.runs || []);
+        if (response) {
+          lastUpdatedAt = Date.now();
+          renderRuns(response.runs || []);
+        }
       }
     } catch (error) {
       renderError(error);
     }
   }
 
-  function pollingInterval(): number {
-    try {
-      const settings = JSON.parse(
-        localStorage.getItem('board-settings') || '{}',
-      ) as { state?: { pollingInterval?: unknown } };
-      const value = Number(settings?.state?.pollingInterval);
-      return Number.isFinite(value) ? value : 5;
-    } catch {
-      return 5;
-    }
-  }
-
   loadPipelineDashboard();
-  const interval = pollingInterval();
-  if (interval > 0) {
-    globalThis.setInterval(loadPipelineDashboard, interval * 1_000);
-  }
 })();

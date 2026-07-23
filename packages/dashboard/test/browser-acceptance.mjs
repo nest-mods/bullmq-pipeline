@@ -100,15 +100,27 @@ try {
     'the selected run must render its RUNNING status badge',
   );
 
+  await new Promise((resolve) => setTimeout(resolve, 5_500));
+  assert.equal(
+    listRequestTimes.length,
+    1,
+    'the run list must remain stable until the user requests fresh data',
+  );
+  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
   await waitFor(
     () => listRequestTimes.length >= 2,
-    9_000,
-    'a second list API request from the default five-second poll',
+    3_000,
+    'a list API request from the manual refresh button',
   );
-  const pollingDelay = listRequestTimes[1] - listRequestTimes[0];
-  assert.ok(
-    pollingDelay >= 4_500 && pollingDelay <= 8_500,
-    `expected the next list API request after five seconds, observed ${pollingDelay}ms`,
+  assert.equal(
+    listRequestTimes.length,
+    2,
+    'one manual refresh must issue one new list API request',
+  );
+  await page.waitForSelector('.runs-table');
+  assert.match(
+    await page.$eval('.last-updated', (element) => element.textContent || ''),
+    /^Updated /,
   );
 
   await clickLinkByTextAndWaitForNavigation(
@@ -204,6 +216,19 @@ try {
     );
   }
 
+  const completedStyle = await nodeStatusStyle(page, 'report-node');
+  const failedStyle = await nodeStatusStyle(page, 'crawl-node');
+  assert.notEqual(
+    completedStyle.badgeColor,
+    failedStyle.badgeColor,
+    'completed and failed badges must be visually distinct',
+  );
+  assert.notEqual(
+    completedStyle.cardBorderColor,
+    failedStyle.cardBorderColor,
+    'completed and failed cards must have distinct state borders',
+  );
+
   const expectedJobUrl = jobUrl(
     jobFixtures[0].queueName,
     jobFixtures[0].jobId,
@@ -297,6 +322,34 @@ try {
     graph.width > 0 && graph.height > 0,
     'stress graph must be visible',
   );
+  const pendingStyle = await nodeStatusStyle(page, 'stress-d00-n00');
+  assert.notEqual(
+    pendingStyle.badgeColor,
+    completedStyle.badgeColor,
+    'pending and completed badges must be visually distinct',
+  );
+
+  const scrolledDistance = await page.$eval(
+    '[data-testid="pipeline-graph"]',
+    (viewport) => {
+      viewport.scrollLeft = Math.min(
+        640,
+        viewport.scrollWidth - viewport.clientWidth,
+      );
+      return viewport.scrollLeft;
+    },
+  );
+  assert.ok(
+    scrolledDistance > 0,
+    'the stress graph must be horizontally scrollable',
+  );
+  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
+  await page.waitForFunction(
+    () => {
+      const viewport = document.querySelector('[data-testid="pipeline-graph"]');
+      return viewport && viewport.scrollLeft === 0;
+    },
+  );
 
   await page.setViewport({ width: 390, height: 844 });
   await page.emulateMediaFeatures([
@@ -362,9 +415,11 @@ try {
 
   listRequestTimes = [];
   await openList(page);
-  const initialRequestAt = listRequestTimes.at(-1);
-  assert.ok(initialRequestAt, 'list page must issue its initial API request');
-  const invalidatedAt = Date.now();
+  assert.equal(
+    listRequestTimes.length,
+    1,
+    'list page must issue its initial API request',
+  );
   const loginNavigation = page.waitForNavigation({
     timeout: 10_000,
     waitUntil: 'domcontentloaded',
@@ -375,6 +430,13 @@ try {
   );
   assert.ok(sessionCookies.length > 0, 'login must create a session cookie');
   await page.deleteCookie(...sessionCookies);
+  await page.evaluate(() => {
+    const button = document.querySelector('.refresh-button');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('Missing refresh button');
+    }
+    button.click();
+  });
   const loginResponse = await loginNavigation;
   assert.ok(loginResponse, 'session expiry must trigger a document navigation');
   assert.ok(
@@ -384,18 +446,7 @@ try {
   assert.equal(
     new URL(page.url()).pathname,
     '/app/bull-board/login',
-    'the next poll after session invalidation must navigate to the proxied login',
-  );
-  const expiredSessionPoll = listRequestTimes.find((time) =>
-    time >= invalidatedAt
-  );
-  assert.ok(
-    expiredSessionPoll,
-    'session invalidation must be detected by a subsequent list API poll',
-  );
-  assert.ok(
-    expiredSessionPoll - initialRequestAt >= 4_500,
-    'session expiry navigation must be driven by the next five-second poll',
+    'manual refresh after session invalidation must navigate to the proxied login',
   );
   assert.deepEqual(
     browserErrors,
@@ -404,7 +455,7 @@ try {
   );
 
   console.log(
-    `real Chromium dashboard acceptance passed: polling=${pollingDelay}ms, ` +
+    `real Chromium dashboard acceptance passed: manual refresh, ` +
       `detail=${detailCounts.nodes} nodes/${detailCounts.connectors} connectors, ` +
       `stress=${graph.nodes} nodes/${graph.connectors} connectors`,
   );
@@ -426,6 +477,20 @@ function jobApiPath(queueName, jobId) {
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function nodeStatusStyle(page, nodeId) {
+  return await page.$eval(`[data-node-id="${nodeId}"]`, (node) => {
+    const badge = node.querySelector('.node-status');
+    if (!badge) {
+      throw new Error(`Missing status badge for ${node.dataset.nodeId}`);
+    }
+    return {
+      badgeColor: getComputedStyle(badge).color,
+      badgeBackground: getComputedStyle(badge).backgroundColor,
+      cardBorderColor: getComputedStyle(node).borderLeftColor,
+    };
+  });
 }
 
 async function login(page) {

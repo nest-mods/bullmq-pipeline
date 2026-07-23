@@ -239,15 +239,16 @@ assert.match(
   /requestJson\((['"])\/api\/pipelines\1\)/,
   'list requests must use the extension-relative API',
 );
-assert.ok(
-  scriptSource.includes('return Number.isFinite(value) ? value : 5;') &&
-    scriptSource.includes('return 5;'),
-  'browser polling must default to five seconds',
-);
-assert.match(
+assert.doesNotMatch(
   scriptSource,
-  /const interval = pollingInterval\(\);\s*if \(interval > 0\) \{\s*globalThis\.setInterval\(loadPipelineDashboard, interval \* (?:1_000|1e3)\);/,
-  'browser polling must schedule using the resolved polling interval',
+  /setInterval|pollingInterval|board-settings/,
+  'the dashboard must not interrupt graph inspection with automatic polling',
+);
+assert.ok(
+  /element\(["']button["'],\s*["']refresh-button["'],\s*["']Refresh["']\)/
+    .test(scriptSource) &&
+    scriptSource.includes('globalThis.location.reload();'),
+  'manual refresh must explicitly reload the current dashboard page',
 );
 assert.match(
   scriptSource,
@@ -293,6 +294,21 @@ assert.equal(
   stylesheetResponse.headers.get('content-type'),
   'text/css; charset=utf-8',
 );
+const stylesheet = await stylesheetResponse.text();
+for (
+  const status of [
+    'PENDING',
+    'RUNNING',
+    'RETRYING',
+    'COMPLETED',
+    'FAILED',
+  ]
+) {
+  assert.ok(
+    stylesheet.includes(`.node[data-status='${status}']`),
+    `node cards must define a distinct ${status} state`,
+  );
+}
 
 const apiResponse = await request(`${extensionBase}/api/pipelines`, cookie);
 assert.equal(
