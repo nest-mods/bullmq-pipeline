@@ -12,7 +12,7 @@ export interface PipelineRedisClient {
 }
 
 export interface PipelineRunRepositoryOptions {
-  keyPrefix?: string;
+  prefix?: string;
   now?: () => number;
 }
 
@@ -29,7 +29,7 @@ export class PipelineRunRepository implements PipelineRunReader {
     private readonly redis: PipelineRedisClient,
     options: PipelineRunRepositoryOptions = {},
   ) {
-    this.keyRoot = `${options.keyPrefix ?? ''}pipeline:`;
+    this.keyRoot = `${options.prefix ?? 'pipeline'}:`;
     this.now = options.now ?? Date.now;
   }
 

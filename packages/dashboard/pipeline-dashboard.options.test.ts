@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 
 import { parsePipelineDashboardOptions } from './pipeline-dashboard.options.ts';
 
-Deno.test('defaults the Redis key prefix to an empty string', () => {
-  assert.deepEqual(parsePipelineDashboardOptions(undefined), { keyPrefix: '' });
-  assert.deepEqual(parsePipelineDashboardOptions({}), { keyPrefix: '' });
+Deno.test('defaults the pipeline namespace prefix to pipeline', () => {
+  assert.deepEqual(parsePipelineDashboardOptions(undefined), {
+    prefix: 'pipeline',
+  });
+  assert.deepEqual(parsePipelineDashboardOptions({}), { prefix: 'pipeline' });
 });
 
-Deno.test('preserves a configured Redis key prefix verbatim', () => {
+Deno.test('preserves a configured pipeline namespace prefix', () => {
   assert.deepEqual(
-    parsePipelineDashboardOptions({ keyPrefix: 'tenant:' }),
-    { keyPrefix: 'tenant:' },
+    parsePipelineDashboardOptions({ prefix: 'tenant_pipeline' }),
+    { prefix: 'tenant_pipeline' },
   );
 });
 
@@ -24,10 +26,20 @@ Deno.test('rejects non-object extension options', () => {
   }
 });
 
-Deno.test('rejects a non-string Redis key prefix', () => {
+Deno.test('rejects a non-string pipeline namespace prefix', () => {
   assert.throws(
-    () => parsePipelineDashboardOptions({ keyPrefix: 1 }),
+    () => parsePipelineDashboardOptions({ prefix: 1 }),
     TypeError,
-    'Pipeline dashboard option "keyPrefix" must be a string',
+    'Pipeline dashboard option "prefix" must be a string',
   );
+});
+
+Deno.test('rejects a pipeline namespace prefix that the runtime cannot use', () => {
+  for (const prefix of ['', ':pipeline', 'tenant:', 'tenant pipeline']) {
+    assert.throws(
+      () => parsePipelineDashboardOptions({ prefix }),
+      TypeError,
+      'Pipeline dashboard option "prefix" must start with a letter or number',
+    );
+  }
 });

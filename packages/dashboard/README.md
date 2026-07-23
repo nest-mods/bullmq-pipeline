@@ -23,11 +23,13 @@ directory resolves to its `mod.ts`, so a container can mount
 BULL_BOARD_EXTENSIONS='["/extensions/pipeline-dashboard"]'
 ```
 
-The optional `keyPrefix` is prepended verbatim to every dashboard Redis key. It
-defaults to an empty string; include any separator you want in the value:
+The optional `prefix` is the Pipeline runtime namespace used to construct every
+dashboard Redis key. It defaults to `pipeline` and follows the runtime's prefix
+format: start with a letter or number, then use letters, numbers, dots,
+underscores, or hyphens.
 
 ```sh
-BULL_BOARD_EXTENSIONS='[{"specifier":"/extensions/pipeline-dashboard","options":{"keyPrefix":"example:"}}]'
+BULL_BOARD_EXTENSIONS='[{"specifier":"/extensions/pipeline-dashboard","options":{"prefix":"example"}}]'
 ```
 
 For HTTPS loading, point directly to `mod.ts` and replace `<commit-sha>` with an
@@ -57,15 +59,15 @@ The dashboard reads these keys:
 - `pipeline:run:{runId}:nodes`: sorted-set index of node IDs.
 - `pipeline:run:{runId}:node:{nodeId}`: node snapshot hash.
 
-These are the default keys. When `keyPrefix` is set, its exact value appears
-before `pipeline:` in each key.
+These are the default keys. When `prefix` is set to `example`, the same keys
+start with `example:`, such as `example:runs` and `example:run:{runId}`.
 
 The list API reads the complete run sorted-set index in descending score order,
 filters stale entries, and then returns at most 100 runs by default. It does not
-modify run or node hash snapshots. A list read does use `ZREM` on
-`pipeline:runs` (with the configured prefix, if any) to remove IDs whose run
-hash is missing and finished `COMPLETED` or `FAILED` runs whose `expiresAt` has
-passed. Expired runs in any non-finished status remain in the index.
+modify run or node hash snapshots. A list read does use `ZREM` on the configured
+`{prefix}:runs` index to remove IDs whose run hash is missing and finished
+`COMPLETED` or `FAILED` runs whose `expiresAt` has passed. Expired runs in any
+non-finished status remain in the index.
 
 ## Acceptance Test
 
