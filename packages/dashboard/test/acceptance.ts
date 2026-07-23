@@ -245,7 +245,8 @@ assert.doesNotMatch(
   'the dashboard must not interrupt graph inspection with automatic polling',
 );
 assert.ok(
-  scriptSource.includes("element('button', 'refresh-button', 'Refresh')") &&
+  /element\(["']button["'],\s*["']refresh-button["'],\s*["']Refresh["']\)/
+    .test(scriptSource) &&
     scriptSource.includes('captureViewportPosition()') &&
     scriptSource.includes('restoreViewportPosition(viewportPosition)'),
   'manual refresh must be explicit and preserve the inspected graph position',
