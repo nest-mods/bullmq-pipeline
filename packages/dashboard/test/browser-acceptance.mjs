@@ -101,7 +101,8 @@ try {
   assert.notEqual(completedStyle.color, failedStyle.color);
   assert.notEqual(completedStyle.cardBorder, failedStyle.cardBorder);
 
-  await page.click(
+  await clickSelector(
+    page,
     '[data-stage-id="crawl-stage"] .stage-status[data-status="FAILED"]',
   );
   await page.waitForSelector('.node-inspector .node-row');
@@ -165,7 +166,8 @@ try {
   assert.ok(stressGraph.totals.every((total) => total === '500 tasks'));
   assert.ok(stressGraph.width > 0 && stressGraph.height > 0);
 
-  await page.click(
+  await clickSelector(
+    page,
     '[data-stage-id="stress-stage-09"] .stage-status[data-status="FAILED"]',
   );
   await page.waitForFunction(
@@ -179,7 +181,7 @@ try {
     })),
     { page: 'Page 1', rows: 25, stageCards: 10 },
   );
-  await page.click('.node-inspector .pagination-link:last-child');
+  await clickSelector(page, '.node-inspector .pagination-link:last-child');
   await page.waitForFunction(
     () =>
       document.querySelector('.node-inspector .pagination-page')?.textContent
@@ -301,6 +303,12 @@ async function clickSelectorAndWaitForNavigation(page, selector) {
   const element = await page.$(selector);
   assert.ok(element, 'Missing selector ' + selector);
   return await clickAndWaitForNavigation(page, element);
+}
+
+async function clickSelector(page, selector) {
+  const element = await page.$(selector);
+  assert.ok(element, 'Missing selector ' + selector);
+  await element.evaluate((target) => target.click());
 }
 
 async function clickAndWaitForNavigation(page, element) {
