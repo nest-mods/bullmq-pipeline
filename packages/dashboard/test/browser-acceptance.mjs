@@ -66,7 +66,7 @@ try {
     1,
     'the list must not refresh while an operator is reading it',
   );
-  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
+  await clickRefreshAndWaitForNavigation(page);
   await page.waitForSelector('.runs-table');
   assert.equal(listRequestCount, 2);
 
@@ -197,7 +197,7 @@ try {
     },
   );
   assert.ok(scrolledDistance > 0, 'the Stage graph must scroll horizontally');
-  await clickSelectorAndWaitForNavigation(page, '.refresh-button');
+  await clickRefreshAndWaitForNavigation(page);
   await page.waitForFunction(
     () =>
       document.querySelector('[data-testid="pipeline-graph"]')?.scrollLeft === 0,
@@ -301,6 +301,21 @@ async function clickSelectorAndWaitForNavigation(page, selector) {
   const element = await page.$(selector);
   assert.ok(element, 'Missing selector ' + selector);
   return await clickAndWaitForNavigation(page, element);
+}
+
+async function clickRefreshAndWaitForNavigation(page) {
+  const navigation = page.waitForNavigation({
+    timeout: 10_000,
+    waitUntil: 'domcontentloaded',
+  });
+  await page.evaluate(() => {
+    const button = document.querySelector('.refresh-button');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('Missing refresh button');
+    }
+    button.click();
+  });
+  return await navigation;
 }
 
 async function clickAndWaitForNavigation(page, element) {
