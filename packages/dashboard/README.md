@@ -1,9 +1,8 @@
 # Pipeline Dashboard Extension
 
 Deno runtime extension for visualizing `@nest-mods/bullmq-pipeline` executions
-inside Bull Board. It provides a recent-run list, query-based run details, a
-dependency graph grouped by pipeline and step, and links back to BullMQ jobs in
-the host board.
+inside Bull Board. It provides a paged recent-run list, folded Stage graph,
+status-filtered Node pages, and links back to BullMQ jobs in the host board.
 
 ## Runtime And Dependencies
 
@@ -43,35 +42,47 @@ BULL_BOARD_EXTENSIONS='["https://raw.githubusercontent.com/nest-mods/bullmq-pipe
 
 - The extension page is `/ext/pipeline-dashboard/` relative to the Bull Board
   host. Run details use `/ext/pipeline-dashboard/?runId=<encoded-id>`.
-- The extension-relative APIs are `GET /api/pipelines` and
-  `GET /api/pipelines/:runId` under that mount.
+- `GET /api/pipelines?page=1&pageSize=25` returns a bounded Run page. Page size
+  defaults to 25 and is capped at 100.
+- `GET /api/pipelines/:runId` returns Run metadata and folded Stage summaries.
+- `GET /api/pipelines/:runId/stages/:stageId/nodes?status=FAILED&page=1&pageSize=25`
+  returns one status-specific Node page.
 - BullMQ job links resolve from the host board root as
   `/queue/{queueName}/{jobId}`, with both path segments encoded.
 - Authentication is inherited from the Bull Board host. Page, API, asset, and
   job URLs also retain a configured Bull Board proxy path.
 - Run data refreshes only when the page opens or the user selects **Refresh**.
   Refresh reloads the current list or run page from its initial position.
-- Node cards use distinct pending, running, retrying, completed, and failed
-  state treatments so large runs remain scannable.
+- Every Stage remains folded at every Node count. Stage summaries and Node rows
+  use distinct pending, running, retrying, completed, and failed treatments.
+- The graph draws one edge for each real parent Stage relationship. Individual
+  Node relationships remain available in Redis but are not drawn on the first
+  screen.
 
-## Redis Data And Cleanup
+## Redis Data Contract
 
 The dashboard reads these keys:
 
 - `pipeline:runs`: sorted-set index of run IDs.
 - `pipeline:run:{runId}`: run summary hash.
-- `pipeline:run:{runId}:nodes`: sorted-set index of node IDs.
 - `pipeline:run:{runId}:node:{nodeId}`: node snapshot hash.
+- `pipeline:run:{runId}:stages`: sorted-set index of Stage IDs.
+- `pipeline:run:{runId}:stage:{stageId}`: Stage metadata hash.
+- `pipeline:run:{runId}:stage:{stageId}:parents`: parent Stage set.
+- `pipeline:run:{runId}:stage:{stageId}:counts`: Node status counts.
+- `pipeline:run:{runId}:stage:{stageId}:nodes:{status}`: status-specific Node
+  index.
 
 These are the default keys. When `prefix` is set to `example`, the same keys
-start with `example:`, such as `example:runs` and `example:run:{runId}`.
+start with `example:`, such as `example:runs` and `example:run:{runId}`. Run
+hashes use `pipelineName` as their Pipeline identity. Node hashes use `stepName`
+for the Step identity and `stageId` for Stage membership.
 
-The list API reads the complete run sorted-set index in descending score order,
-filters stale entries, and then returns at most 100 runs by default. It does not
-modify run or node hash snapshots. A list read does use `ZREM` on the configured
-`{prefix}:runs` index to remove IDs whose run hash is missing and finished
-`COMPLETED` or `FAILED` runs whose `expiresAt` has passed. Expired runs in any
-non-finished status remain in the index.
+The list API reads only the requested range plus one entry from the Run index.
+Run details read Stage summaries without scanning the Run Node index. A Node
+request reads only the selected Stage, status, and page. The extension is a
+read-only consumer: missing snapshots are skipped, while the Pipeline runtime
+owns index retention and expired Run cleanup.
 
 ## Acceptance Test
 
@@ -85,8 +96,8 @@ This first runs focused resource-lifecycle and Docker-runner tests, then the
 real disposable Docker acceptance path. It starts `diluka/bull-board:next`,
 Redis, and Nginx with authentication enabled, mounts the local extension, and
 creates real BullMQ jobs covering completion, retry-then-completion, and
-exhausted retries. A fixed `ghcr.io/puppeteer/puppeteer:24.16.0` image
-automatically runs Chromium through login, manual refresh, detail/job
-navigation, responsive media modes, and session expiry. The suite also verifies
-proxied APIs, job states, and TypeScript-based Redis cleanup assertions without
-snapshot deletion, then removes the Docker fixtures afterward.
+exhausted retries. Fixtures exercise 100, 500, 1000, and 5000 Node Runs while
+the first screen remains bounded to Stage summaries. A fixed
+`ghcr.io/puppeteer/puppeteer:24.16.0` image runs Chromium through login, manual
+refresh, Stage/Node navigation, Job navigation, responsive media modes, and
+session expiry. The suite removes its disposable fixtures afterward.

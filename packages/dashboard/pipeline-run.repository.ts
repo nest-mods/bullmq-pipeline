@@ -1,88 +1,147 @@
 import type {
   PipelineNodeSnapshot,
+  PipelineNodeStatus,
+  PipelinePageInfo,
+  PipelinePageRequest,
   PipelineRunDetails,
+  PipelineRunsResponse,
+  PipelineRunStatus,
   PipelineRunSummary,
+  PipelineStageCounts,
+  PipelineStageNodesResponse,
+  PipelineStageSummary,
 } from './pipeline.types.ts';
 
 export interface PipelineRedisClient {
   hgetall(key: string): Promise<Record<string, string>>;
+  smembers(key: string): Promise<string[]>;
   zrange(key: string, start: number, end: number): Promise<string[]>;
   zrevrange(key: string, start: number, end: number): Promise<string[]>;
-  zrem(key: string, ...members: string[]): Promise<number>;
 }
 
 export interface PipelineRunRepositoryOptions {
   prefix?: string;
-  now?: () => number;
 }
 
 export interface PipelineRunReader {
-  listRuns(limit?: number): Promise<PipelineRunSummary[]>;
+  listRuns(page?: PipelinePageRequest): Promise<PipelineRunsResponse>;
   getRun(runId: string): Promise<PipelineRunDetails | null>;
+  getStageNodes(
+    runId: string,
+    stageId: string,
+    status: PipelineNodeStatus,
+    page?: PipelinePageRequest,
+  ): Promise<PipelineStageNodesResponse | null>;
 }
 
 export class PipelineRunRepository implements PipelineRunReader {
   private readonly keyRoot: string;
-  private readonly now: () => number;
 
   constructor(
     private readonly redis: PipelineRedisClient,
     options: PipelineRunRepositoryOptions = {},
   ) {
     this.keyRoot = `${options.prefix ?? 'pipeline'}:`;
-    this.now = options.now ?? Date.now;
   }
 
-  async listRuns(limit = 100): Promise<PipelineRunSummary[]> {
-    const runsKey = `${this.keyRoot}runs`;
-    const runIds = await this.redis.zrevrange(runsKey, 0, -1);
+  async listRuns(
+    request: PipelinePageRequest = {},
+  ): Promise<PipelineRunsResponse> {
+    const page = this.page(request);
+    const offset = (page.page - 1) * page.pageSize;
+    const runIds = await this.redis.zrevrange(
+      `${this.keyRoot}runs`,
+      offset,
+      offset + page.pageSize,
+    );
     const runs = await Promise.all(
       runIds.map(async (runId) =>
         this.parseRun(await this.redis.hgetall(this.runKey(runId)))
       ),
     );
-    const staleRunIds = runIds.filter((_runId, index) =>
-      this.isStale(runs[index])
-    );
-
-    if (staleRunIds.length > 0) {
-      await this.redis.zrem(runsKey, ...staleRunIds);
-    }
-
-    const staleRunIdSet = new Set(staleRunIds);
-    return runs
-      .flatMap((run, index) =>
-        run && !staleRunIdSet.has(runIds[index]) ? [run] : []
-      )
-      .slice(0, Math.max(0, limit));
+    return {
+      runs: runs
+        .filter((run): run is PipelineRunSummary => run !== null)
+        .slice(0, page.pageSize),
+      pageInfo: this.pageInfo(
+        page,
+        runIds.length > page.pageSize,
+      ),
+    };
   }
 
   async getRun(runId: string): Promise<PipelineRunDetails | null> {
     const run = this.parseRun(await this.redis.hgetall(this.runKey(runId)));
     if (!run) return null;
 
-    const nodeIds = await this.redis.zrange(this.nodesKey(runId), 0, -1);
-    const nodes = await Promise.all(
-      nodeIds.map(async (nodeId) =>
-        this.parseNode(
-          await this.redis.hgetall(this.nodeKey(runId, nodeId)),
-          run.pipelineName,
-        )
-      ),
+    const stageIds = await this.redis.zrange(this.stagesKey(runId), 0, -1);
+    const stages = await Promise.all(
+      stageIds.map(async (stageId) => await this.readStage(runId, stageId)),
     );
 
     return {
       run,
-      nodes: nodes.filter((node): node is PipelineNodeSnapshot =>
-        node !== null
+      stages: stages.filter((stage): stage is PipelineStageSummary =>
+        stage !== null
       ),
     };
   }
 
-  private isStale(run: PipelineRunSummary | null): boolean {
-    if (!run) return true;
-    const finished = run.status === 'COMPLETED' || run.status === 'FAILED';
-    return finished && run.expiresAt !== null && run.expiresAt <= this.now();
+  async getStageNodes(
+    runId: string,
+    stageId: string,
+    status: PipelineNodeStatus,
+    request: PipelinePageRequest = {},
+  ): Promise<PipelineStageNodesResponse | null> {
+    const [run, stage] = await Promise.all([
+      this.redis.hgetall(this.runKey(runId)),
+      this.redis.hgetall(this.stageKey(runId, stageId)),
+    ]);
+    if (!run.id || !stage.id) return null;
+
+    const page = this.page(request);
+    const offset = (page.page - 1) * page.pageSize;
+    const nodeIds = await this.redis.zrange(
+      this.stageNodesKey(runId, stageId, status),
+      offset,
+      offset + page.pageSize,
+    );
+    const nodes = await Promise.all(
+      nodeIds.slice(0, page.pageSize).map(async (nodeId) =>
+        this.parseNode(await this.redis.hgetall(this.nodeKey(runId, nodeId)))
+      ),
+    );
+
+    return {
+      nodes: nodes.filter((node): node is PipelineNodeSnapshot =>
+        node !== null
+      ),
+      pageInfo: this.pageInfo(page, nodeIds.length > page.pageSize),
+    };
+  }
+
+  private async readStage(
+    runId: string,
+    stageId: string,
+  ): Promise<PipelineStageSummary | null> {
+    const [stage, counts, parentStageIds] = await Promise.all([
+      this.redis.hgetall(this.stageKey(runId, stageId)),
+      this.redis.hgetall(this.stageCountsKey(runId, stageId)),
+      this.redis.smembers(this.stageParentsKey(runId, stageId)),
+    ]);
+    if (!stage.id) return null;
+
+    return {
+      id: stage.id,
+      runId: stage.runId,
+      invocationId: stage.invocationId,
+      pipelineName: stage.pipelineName,
+      stepName: stage.stepName,
+      parentStageIds: parentStageIds.sort(),
+      counts: this.parseCounts(counts),
+      createdAt: this.nullableNumber(stage.createdAt),
+      updatedAt: this.nullableNumber(stage.updatedAt),
+    };
   }
 
   private parseRun(data: Record<string, string>): PipelineRunSummary | null {
@@ -90,86 +149,117 @@ export class PipelineRunRepository implements PipelineRunReader {
 
     return {
       id: data.id,
-      name: data.name || data.pipelineName || data.id,
-      pipelineName: data.pipelineName || data.name || data.id,
-      status: data.status || 'PENDING',
-      error: data.error || '',
-      pendingNodes: this.number(data.pendingNodes) ?? 0,
-      failedNodes: this.number(data.failedNodes) ?? 0,
-      createdAt: this.number(data.createdAt),
-      updatedAt: this.number(data.updatedAt),
-      completedAt: this.number(data.completedAt),
-      expiresAt: this.number(data.expiresAt),
+      pipelineName: data.pipelineName,
+      status: data.status as PipelineRunStatus,
+      error: data.error,
+      createdNodes: Number(data.createdNodes),
+      completedNodes: Number(data.completedNodes),
+      pendingNodes: Number(data.pendingNodes),
+      failedNodes: Number(data.failedNodes),
+      createdAt: this.nullableNumber(data.createdAt),
+      updatedAt: this.nullableNumber(data.updatedAt),
+      completedAt: this.nullableNumber(data.completedAt),
+      expiresAt: this.nullableNumber(data.expiresAt),
     };
   }
 
   private parseNode(
     data: Record<string, string>,
-    fallbackPipelineName: string,
   ): PipelineNodeSnapshot | null {
     if (!data.id) return null;
-    const stepName = data.stepName || data.stage || data.name || data.id;
 
     return {
       id: data.id,
-      runId: data.runId || '',
-      pipelineName: data.pipelineName || fallbackPipelineName,
-      invocationId: data.invocationId || '',
-      scopeId: data.scopeId || '',
-      name: data.name || stepName,
-      stepName,
-      stage: data.stage || stepName,
-      status: data.status || 'PENDING',
+      runId: data.runId,
+      pipelineName: data.pipelineName,
+      invocationId: data.invocationId,
+      scopeId: data.scopeId,
+      stageId: data.stageId,
+      stepName: data.stepName,
+      status: data.status as PipelineNodeStatus,
       parentNodeIds: this.stringArray(data.parentNodeIds),
-      queueName: data.queueName || '',
-      jobId: data.jobId || '',
-      attempt: this.number(data.attempt) ?? 0,
-      maxAttempts: this.number(data.maxAttempts) ?? 1,
+      queueName: data.queueName,
+      jobId: data.jobId,
+      attempt: Number(data.attempt),
+      maxAttempts: Number(data.maxAttempts),
       progress: this.jsonObject(data.progress),
-      forkName: data.forkName || '',
-      error: data.error || '',
-      createdAt: this.number(data.createdAt),
-      updatedAt: this.number(data.updatedAt),
-      startedAt: this.number(data.startedAt),
-      completedAt: this.number(data.completedAt),
+      forkName: data.forkName,
+      error: data.error,
+      order: Number(data.order),
+      createdAt: this.nullableNumber(data.createdAt),
+      updatedAt: this.nullableNumber(data.updatedAt),
+      startedAt: this.nullableNumber(data.startedAt),
+      completedAt: this.nullableNumber(data.completedAt),
     };
   }
 
-  private number(value: string | undefined): number | null {
+  private parseCounts(data: Record<string, string>): PipelineStageCounts {
+    return {
+      PENDING: Number(data.PENDING),
+      RUNNING: Number(data.RUNNING),
+      RETRYING: Number(data.RETRYING),
+      COMPLETED: Number(data.COMPLETED),
+      FAILED: Number(data.FAILED),
+    };
+  }
+
+  private page(request: PipelinePageRequest): Required<PipelinePageRequest> {
+    return {
+      page: request.page ?? 1,
+      pageSize: request.pageSize ?? 25,
+    };
+  }
+
+  private pageInfo(
+    page: Required<PipelinePageRequest>,
+    hasNextPage: boolean,
+  ): PipelinePageInfo {
+    return {
+      ...page,
+      hasPreviousPage: page.page > 1,
+      hasNextPage,
+    };
+  }
+
+  private nullableNumber(value: string | undefined): number | null {
     if (!value) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+    return Number(value);
   }
 
-  private stringArray(value: string | undefined): string[] {
-    if (!value) return [];
-    try {
-      const parsed: unknown = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.map(String) : [];
-    } catch {
-      return [];
-    }
+  private stringArray(value: string): string[] {
+    return JSON.parse(value) as string[];
   }
 
-  private jsonObject(value: string | undefined): Record<string, unknown> {
-    if (!value) return {};
-    try {
-      const parsed: unknown = JSON.parse(value);
-      return parsed !== null && typeof parsed === 'object' &&
-          !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
+  private jsonObject(value: string): Record<string, unknown> {
+    return JSON.parse(value) as Record<string, unknown>;
   }
 
   private runKey(runId: string): string {
     return `${this.keyRoot}run:${runId}`;
   }
 
-  private nodesKey(runId: string): string {
-    return `${this.runKey(runId)}:nodes`;
+  private stagesKey(runId: string): string {
+    return `${this.runKey(runId)}:stages`;
+  }
+
+  private stageKey(runId: string, stageId: string): string {
+    return `${this.runKey(runId)}:stage:${stageId}`;
+  }
+
+  private stageParentsKey(runId: string, stageId: string): string {
+    return `${this.stageKey(runId, stageId)}:parents`;
+  }
+
+  private stageCountsKey(runId: string, stageId: string): string {
+    return `${this.stageKey(runId, stageId)}:counts`;
+  }
+
+  private stageNodesKey(
+    runId: string,
+    stageId: string,
+    status: PipelineNodeStatus,
+  ): string {
+    return `${this.stageKey(runId, stageId)}:nodes:${status}`;
   }
 
   private nodeKey(runId: string, nodeId: string): string {

@@ -15,7 +15,6 @@ Deno.test('dashboard runner executes browser acceptance before final cleanup', a
       ['run', '--rm', '--no-deps', 'bullmq-assertion'],
       ['run', '--rm', '--no-deps', 'acceptance'],
       ['run', '--rm', '--no-deps', 'browser-acceptance'],
-      ['run', '--rm', '--no-deps', 'redis-assertion'],
       cleanupCommand,
     ],
   );

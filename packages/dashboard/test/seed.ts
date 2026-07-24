@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import { Queue, QueueEvents, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 
+import type { PipelineNodeStatus } from '../pipeline.types.ts';
 import { withResourceScope } from './resource-lifecycle.ts';
 
 const reportQueueName = 'pipeline--social-analysis-report--report-work';
@@ -171,17 +172,19 @@ async function seedDashboardFixtures(
   pipeline.zadd(pipelineRunsKey, 1999997, runId);
   pipeline.hset(pipelineRunKey(runId), {
     id: runId,
-    name: 'social-analysis-report',
     pipelineName: 'social-analysis-report',
     status: 'RUNNING',
     error: '',
+    createdNodes: 4,
+    completedNodes: 2,
     pendingNodes: 1,
     failedNodes: 1,
     createdAt: 1784500000000,
     updatedAt: 1784503600000,
   });
 
-  const nodesKey = `${pipelineRunKey(runId)}:nodes`;
+  const runKey = pipelineRunKey(runId);
+  const nodesKey = `${runKey}:nodes`;
   pipeline.zadd(
     nodesKey,
     1001,
@@ -190,6 +193,8 @@ async function seedDashboardFixtures(
     'trend-node',
     1003,
     'crawl-node',
+    1004,
+    'finalize-node',
   );
   const nodeFixtures = [
     {
@@ -197,6 +202,9 @@ async function seedDashboardFixtures(
       pipelineName: 'social-analysis-report',
       invocationId: 'report-invocation',
       scopeId: 'report-scope',
+      stageId: 'report-stage',
+      order: 1001,
+      parentStageIds: [],
       parentNodeIds: [],
       job: reportJob,
     },
@@ -205,6 +213,9 @@ async function seedDashboardFixtures(
       pipelineName: 'social-analysis-trend',
       invocationId: 'trend-invocation',
       scopeId: 'trend-scope',
+      stageId: 'trend-stage',
+      order: 1002,
+      parentStageIds: ['report-stage'],
       parentNodeIds: ['report-node'],
       job: trendJob,
     },
@@ -213,6 +224,9 @@ async function seedDashboardFixtures(
       pipelineName: 'social-analysis-crawl',
       invocationId: 'crawl-invocation',
       scopeId: 'crawl-scope',
+      stageId: 'crawl-stage',
+      order: 1003,
+      parentStageIds: ['report-stage'],
       parentNodeIds: ['report-node'],
       job: crawlJob,
     },
@@ -227,9 +241,8 @@ async function seedDashboardFixtures(
       pipelineName: fixture.pipelineName,
       invocationId: fixture.invocationId,
       scopeId: fixture.scopeId,
-      name: fixture.job.name,
+      stageId: fixture.stageId,
       stepName: fixture.job.name,
-      stage: fixture.job.name,
       status: state.toUpperCase(),
       parentNodeIds: JSON.stringify(fixture.parentNodeIds),
       queueName: fixture.job.queueName,
@@ -237,176 +250,187 @@ async function seedDashboardFixtures(
       attempt: fixture.job.attemptsMade,
       maxAttempts: fixture.job.opts.attempts ?? 1,
       progress: JSON.stringify(fixture.job.progress),
+      forkName: '',
       error: state === 'failed' ? fixture.job.failedReason : '',
+      order: fixture.order,
+      createdAt: 1784500000000,
+      updatedAt: 1784503600000,
     });
+    pipeline.zadd(`${runKey}:stages`, fixture.order, fixture.stageId);
+    pipeline.hset(`${runKey}:stage:${fixture.stageId}`, {
+      id: fixture.stageId,
+      runId,
+      invocationId: fixture.invocationId,
+      pipelineName: fixture.pipelineName,
+      stepName: fixture.job.name,
+      createdAt: 1784500000000,
+      updatedAt: 1784503600000,
+    });
+    pipeline.hset(`${runKey}:stage:${fixture.stageId}:counts`, {
+      PENDING: 0,
+      RUNNING: 0,
+      RETRYING: 0,
+      COMPLETED: state === 'completed' ? 1 : 0,
+      FAILED: state === 'failed' ? 1 : 0,
+    });
+    if (fixture.parentStageIds.length > 0) {
+      pipeline.sadd(
+        `${runKey}:stage:${fixture.stageId}:parents`,
+        ...fixture.parentStageIds,
+      );
+    }
+    pipeline.zadd(
+      `${runKey}:stage:${fixture.stageId}:nodes:${state.toUpperCase()}`,
+      fixture.order,
+      fixture.id,
+    );
   }
+  pipeline.zadd(`${runKey}:stages`, 1004, 'finalize-stage');
+  pipeline.hset(`${runKey}:stage:finalize-stage`, {
+    id: 'finalize-stage',
+    runId,
+    invocationId: 'report-invocation',
+    pipelineName: 'social-analysis-report',
+    stepName: 'complete-report-generation',
+    createdAt: 1784503600000,
+    updatedAt: 1784503600000,
+  });
+  pipeline.hset(`${runKey}:stage:finalize-stage:counts`, {
+    PENDING: 1,
+    RUNNING: 0,
+    RETRYING: 0,
+    COMPLETED: 0,
+    FAILED: 0,
+  });
+  pipeline.sadd(
+    `${runKey}:stage:finalize-stage:parents`,
+    'trend-stage',
+    'crawl-stage',
+  );
+  pipeline.zadd(
+    `${runKey}:stage:finalize-stage:nodes:PENDING`,
+    1004,
+    'finalize-node',
+  );
+  pipeline.hset(`${runKey}:node:finalize-node`, {
+    id: 'finalize-node',
+    runId,
+    pipelineName: 'social-analysis-report',
+    invocationId: 'report-invocation',
+    scopeId: 'report-scope',
+    stageId: 'finalize-stage',
+    stepName: 'complete-report-generation',
+    status: 'PENDING',
+    parentNodeIds: JSON.stringify(['trend-node', 'crawl-node']),
+    queueName: reportQueueName,
+    jobId: '',
+    attempt: 0,
+    maxAttempts: 1,
+    progress: '{}',
+    forkName: '',
+    error: '',
+    order: 1004,
+    createdAt: 1784503600000,
+    updatedAt: 1784503600000,
+  });
 
   pipeline.zadd(
     pipelineRunsKey,
     2000003,
     'missing-run',
-    2000002,
-    'dashboard-expired-completed',
-    2000001,
-    'dashboard-expired-failed',
-    2000000,
-    'dashboard-expired-running',
-    1999999,
-    'dashboard-malformed-run',
-    1999998,
-    'dashboard-stress-run',
-  );
-  const completedRunKey = pipelineRunKey('dashboard-expired-completed');
-  pipeline.hset(completedRunKey, {
-    id: 'dashboard-expired-completed',
-    name: 'expired-completed',
-    pipelineName: 'retention-pipeline',
-    status: 'COMPLETED',
-    expiresAt: 1,
-  });
-  pipeline.zadd(
-    `${completedRunKey}:nodes`,
-    1,
-    'expired-completed-node',
-  );
-  pipeline.hset(
-    `${completedRunKey}:node:expired-completed-node`,
-    {
-      id: 'expired-completed-node',
-      runId: 'dashboard-expired-completed',
-      status: 'COMPLETED',
-      stepName: 'retention-checkpoint',
-    },
-  );
-  pipeline.hset(pipelineRunKey('dashboard-expired-failed'), {
-    id: 'dashboard-expired-failed',
-    name: 'expired-failed',
-    pipelineName: 'retention-pipeline',
-    status: 'FAILED',
-    expiresAt: 1,
-  });
-  pipeline.hset(pipelineRunKey('dashboard-expired-running'), {
-    id: 'dashboard-expired-running',
-    name: 'expired-running',
-    pipelineName: 'retention-pipeline',
-    status: 'RUNNING',
-    pendingNodes: 2,
-    failedNodes: 0,
-    createdAt: 100,
-    updatedAt: 200,
-    expiresAt: 1,
-  });
-  const malformedRunKey = pipelineRunKey('dashboard-malformed-run');
-  pipeline.hset(malformedRunKey, {
-    id: 'dashboard-malformed-run',
-    name: '',
-    pipelineName: '',
-    status: '',
-    error: '',
-    pendingNodes: 'invalid',
-    failedNodes: '',
-    createdAt: 'invalid',
-    updatedAt: '',
-    completedAt: 'Infinity',
-    expiresAt: 'NaN',
-  });
-
-  const malformedNodesKey = `${malformedRunKey}:nodes`;
-  pipeline.zadd(
-    malformedNodesKey,
-    1,
-    'invalid-json-node',
-    2,
-    'wrong-type-node',
-    3,
-    'missing-node-hash',
-  );
-  pipeline.hset(
-    `${malformedRunKey}:node:invalid-json-node`,
-    {
-      id: 'invalid-json-node',
-      runId: '',
-      pipelineName: '',
-      invocationId: '',
-      scopeId: '',
-      name: '',
-      stepName: '',
-      stage: '',
-      status: '',
-      parentNodeIds: 'not-json',
-      queueName: '',
-      jobId: '',
-      attempt: 'invalid',
-      maxAttempts: '',
-      progress: 'not-json',
-      forkName: '',
-      error: '',
-      createdAt: 'invalid',
-      updatedAt: '',
-      startedAt: 'NaN',
-      completedAt: '',
-    },
-  );
-  pipeline.hset(
-    `${malformedRunKey}:node:wrong-type-node`,
-    {
-      id: 'wrong-type-node',
-      runId: '',
-      pipelineName: '',
-      invocationId: '',
-      scopeId: '',
-      name: '',
-      stepName: '',
-      stage: 'fallback-stage',
-      status: '',
-      parentNodeIds: '{"parent":"wrong-type"}',
-      queueName: '',
-      jobId: '',
-      attempt: '',
-      maxAttempts: 'invalid',
-      progress: '["wrong-type"]',
-      forkName: '',
-      error: '',
-      createdAt: '',
-      updatedAt: 'invalid',
-      startedAt: '',
-      completedAt: 'Infinity',
-    },
   );
 
-  const stressRunKey = pipelineRunKey('dashboard-stress-run');
-  pipeline.hset(stressRunKey, {
-    id: 'dashboard-stress-run',
-    name: 'stress-pipeline',
-    pipelineName: 'stress-pipeline',
-    status: 'RUNNING',
-    pendingNodes: 180,
-    failedNodes: 0,
-    createdAt: 300,
-    updatedAt: 400,
-  });
-  const stressNodesKey = `${stressRunKey}:nodes`;
-  for (let depth = 0; depth < 10; depth++) {
-    for (let index = 0; index < 20; index++) {
-      const nodeId = stressNodeId(depth, index);
-      const parentNodeIds = depth === 0 ? [] : [stressNodeId(depth - 1, index)];
-      pipeline.zadd(stressNodesKey, depth * 20 + index, nodeId);
-      pipeline.hset(
-        `${stressRunKey}:node:${nodeId}`,
-        {
+  const cardinalities = [100, 500, 1_000, 5_000];
+  const statuses: PipelineNodeStatus[] = [
+    'PENDING',
+    'RUNNING',
+    'RETRYING',
+    'COMPLETED',
+    'FAILED',
+  ];
+  for (const cardinality of cardinalities) {
+    const cardinalityRunId = cardinality === 5_000
+      ? 'dashboard-stress-run'
+      : `dashboard-cardinality-${cardinality}`;
+    const cardinalityRunKey = pipelineRunKey(cardinalityRunId);
+    const nodesPerStage = cardinality / 10;
+    pipeline.zadd(
+      pipelineRunsKey,
+      1999998 - cardinalities.indexOf(cardinality),
+      cardinalityRunId,
+    );
+    pipeline.hset(cardinalityRunKey, {
+      id: cardinalityRunId,
+      pipelineName: 'stress-pipeline',
+      status: 'FAILED',
+      error: '',
+      createdNodes: cardinality,
+      completedNodes: cardinality / 5,
+      pendingNodes: cardinality * 3 / 5,
+      failedNodes: cardinality / 5,
+      createdAt: 300,
+      updatedAt: 400,
+    });
+    for (let depth = 0; depth < 10; depth++) {
+      const stageId = stressStageId(depth);
+      pipeline.zadd(`${cardinalityRunKey}:stages`, depth, stageId);
+      pipeline.hset(`${cardinalityRunKey}:stage:${stageId}`, {
+        id: stageId,
+        runId: cardinalityRunId,
+        invocationId: 'stress-invocation',
+        pipelineName: 'stress-pipeline',
+        stepName: `depth-${depth}`,
+        createdAt: 300 + depth,
+        updatedAt: 400,
+      });
+      pipeline.hset(`${cardinalityRunKey}:stage:${stageId}:counts`, {
+        PENDING: nodesPerStage / 5,
+        RUNNING: nodesPerStage / 5,
+        RETRYING: nodesPerStage / 5,
+        COMPLETED: nodesPerStage / 5,
+        FAILED: nodesPerStage / 5,
+      });
+      if (depth > 0) {
+        pipeline.sadd(
+          `${cardinalityRunKey}:stage:${stageId}:parents`,
+          stressStageId(depth - 1),
+        );
+      }
+      for (let index = 0; index < nodesPerStage; index++) {
+        const nodeId = stressNodeId(depth, index);
+        const parentNodeIds = depth === 0
+          ? []
+          : [stressNodeId(depth - 1, index)];
+        const status = statuses[index % statuses.length];
+        const order = depth * nodesPerStage + index;
+        pipeline.zadd(`${cardinalityRunKey}:nodes`, order, nodeId);
+        pipeline.zadd(
+          `${cardinalityRunKey}:stage:${stageId}:nodes:${status}`,
+          order,
+          nodeId,
+        );
+        pipeline.hset(`${cardinalityRunKey}:node:${nodeId}`, {
           id: nodeId,
-          runId: 'dashboard-stress-run',
+          runId: cardinalityRunId,
           pipelineName: 'stress-pipeline',
-          name: `depth-${depth}`,
+          invocationId: 'stress-invocation',
+          scopeId: 'stress-scope',
+          stageId,
           stepName: `depth-${depth}`,
-          stage: `depth-${depth}`,
-          status: 'PENDING',
+          status,
           parentNodeIds: JSON.stringify(parentNodeIds),
-          attempt: 1,
-          maxAttempts: 1,
+          queueName: `pipeline--stress-pipeline--depth-${depth}`,
+          jobId: nodeId,
+          attempt: status === 'RETRYING' ? 2 : 1,
+          maxAttempts: 3,
           progress: JSON.stringify({ depth, index }),
-        },
-      );
+          forkName: '',
+          error: status === 'FAILED' ? `failure ${nodeId}` : '',
+          order,
+          createdAt: 300 + order,
+          updatedAt: 400,
+        });
+      }
     }
   }
 
@@ -416,13 +440,16 @@ async function seedDashboardFixtures(
     pipeline.zadd(pipelineRunsKey, 1000000 + index, bulkId);
     pipeline.hset(pipelineRunKey(bulkId), {
       id: bulkId,
-      name: `bulk-${suffix}`,
       pipelineName: 'bulk-pipeline',
       status: 'COMPLETED',
+      error: '',
+      createdNodes: index,
+      completedNodes: index,
       pendingNodes: 0,
       failedNodes: 0,
       createdAt: index,
       updatedAt: index,
+      completedAt: index,
     });
   }
 
@@ -440,4 +467,8 @@ function stressNodeId(depth: number, index: number): string {
   return `stress-d${String(depth).padStart(2, '0')}-n${
     String(index).padStart(2, '0')
   }`;
+}
+
+function stressStageId(depth: number): string {
+  return `stress-stage-${String(depth).padStart(2, '0')}`;
 }
