@@ -1,21 +1,29 @@
 import type {
   PipelineErrorResponse,
   PipelineNodeSnapshot,
+  PipelineNodeStatus,
+  PipelinePageInfo,
   PipelineRunDetails,
   PipelineRunsResponse,
   PipelineRunSummary,
+  PipelineStageNodesResponse,
+  PipelineStageSummary,
 } from '../pipeline.types.ts';
-
-interface PipelineGraphGroup {
-  pipelineName: string;
-  stepName: string;
-  nodes: PipelineNodeSnapshot[];
-}
 
 interface PipelineGraphColumn {
   depth: number;
-  groups: PipelineGraphGroup[];
+  stages: PipelineStageSummary[];
 }
+
+const LIST_PAGE_SIZE = 25;
+const NODE_PAGE_SIZE = 25;
+const STATUS_ORDER: PipelineNodeStatus[] = [
+  'FAILED',
+  'RETRYING',
+  'RUNNING',
+  'PENDING',
+  'COMPLETED',
+];
 
 (() => {
   const root = document.querySelector<HTMLElement>('#pipeline-dashboard');
@@ -23,9 +31,10 @@ interface PipelineGraphColumn {
 
   const extensionRoot = new URL('.', globalThis.location.href);
   const boardRoot = new URL('../../', extensionRoot);
-  const runId = new URLSearchParams(globalThis.location.search).get('runId') ||
-    '';
-  const nodeElements = new Map<string, HTMLElement>();
+  const search = new URLSearchParams(globalThis.location.search);
+  const runId = search.get('runId') || '';
+  const runPage = positivePage(search.get('page'));
+  const stageElements = new Map<string, HTMLElement>();
   let resizeObserver: ResizeObserver | undefined;
   let redrawEdges: (() => void) | undefined;
   let lastUpdatedAt: number | null = null;
@@ -55,12 +64,12 @@ interface PipelineGraphColumn {
     return parent;
   }
 
-  function normalizeStatus(value: unknown): string {
-    return String(value || 'PENDING').toUpperCase();
+  function positivePage(value: string | null): number {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
   }
 
-  function statusBadge(value: unknown): HTMLSpanElement {
-    const status = normalizeStatus(value);
+  function statusBadge(status: PipelineNodeStatus): HTMLSpanElement {
     const badge = element('span', 'status', status);
     badge.dataset.status = status;
     return badge;
@@ -82,9 +91,7 @@ interface PipelineGraphColumn {
     const button = element('button', 'refresh-button', 'Refresh');
     button.type = 'button';
     button.title = 'Refresh pipeline data';
-    button.addEventListener('click', () => {
-      globalThis.location.reload();
-    });
+    button.addEventListener('click', () => globalThis.location.reload());
     append(control, updated, button);
     return control;
   }
@@ -100,6 +107,12 @@ interface PipelineGraphColumn {
   function pipelineRunPath(id: string): string {
     const url = new URL(extensionRoot);
     url.searchParams.set('runId', id);
+    return url.href;
+  }
+
+  function pipelineListPath(page: number): string {
+    const url = new URL(extensionRoot);
+    if (page > 1) url.searchParams.set('page', String(page));
     return url.href;
   }
 
@@ -166,7 +179,46 @@ interface PipelineGraphColumn {
     root!.replaceChildren(page);
   }
 
-  function renderRuns(runs: PipelineRunSummary[]): void {
+  function runTaskSummary(run: PipelineRunSummary): string {
+    if (run.completedAt !== null) {
+      return `${run.createdNodes} tasks${
+        run.failedNodes > 0 ? ` · ${run.failedNodes} failed` : ''
+      }`;
+    }
+    return `${run.completedNodes} completed · ${run.pendingNodes} unfinished${
+      run.failedNodes > 0 ? ` · ${run.failedNodes} failed` : ''
+    }`;
+  }
+
+  function pagination(
+    pageInfo: PipelinePageInfo,
+    pathForPage: (page: number) => string,
+  ): HTMLElement {
+    const nav = element('nav', 'pagination');
+    nav.setAttribute('aria-label', 'Pagination');
+    const previous = element('a', 'pagination-link', 'Previous');
+    previous.href = pathForPage(Math.max(1, pageInfo.page - 1));
+    if (!pageInfo.hasPreviousPage) {
+      previous.setAttribute('aria-disabled', 'true');
+      previous.tabIndex = -1;
+    }
+    const next = element('a', 'pagination-link', 'Next');
+    next.href = pathForPage(pageInfo.page + 1);
+    if (!pageInfo.hasNextPage) {
+      next.setAttribute('aria-disabled', 'true');
+      next.tabIndex = -1;
+    }
+    append(
+      nav,
+      previous,
+      element('span', 'pagination-page', `Page ${pageInfo.page}`),
+      next,
+    );
+    return nav;
+  }
+
+  function renderRuns(response: PipelineRunsResponse): void {
+    const { runs, pageInfo } = response;
     const section = element('section', 'page');
     const header = element('header', 'page-header');
     const title = element('div');
@@ -178,13 +230,14 @@ interface PipelineGraphColumn {
     append(
       header,
       title,
-      pageActions(element('span', 'run-count', `${runs.length} runs`)),
+      pageActions(element('span', 'run-count', `Page ${pageInfo.page}`)),
     );
     section.append(header);
 
     if (runs.length === 0) {
       section.append(
-        element('div', 'empty', 'No pipeline runs have reported progress yet.'),
+        element('div', 'empty', 'No pipeline runs reported on this page.'),
+        pagination(pageInfo, pipelineListPath),
       );
       root!.replaceChildren(section);
       return;
@@ -194,7 +247,7 @@ interface PipelineGraphColumn {
     const table = element('table', 'runs-table');
     const head = element('thead');
     const headingRow = element('tr');
-    ['Pipeline', 'Status', 'Pending / Failed', 'Updated'].forEach((label) =>
+    ['Pipeline', 'Status', 'Tasks', 'Updated'].forEach((label) =>
       headingRow.append(element('th', '', label))
     );
     head.append(headingRow);
@@ -214,11 +267,7 @@ interface PipelineGraphColumn {
         row,
         pipelineCell,
         statusCell,
-        element(
-          'td',
-          '',
-          `${run.pendingNodes} pending / ${run.failedNodes} failed`,
-        ),
+        element('td', 'task-summary', runTaskSummary(run)),
         element('td', '', formatTime(run.updatedAt)),
       );
       body.append(row);
@@ -226,100 +275,91 @@ interface PipelineGraphColumn {
 
     append(table, head, body);
     frame.append(table);
-    section.append(frame);
+    section.append(frame, pagination(pageInfo, pipelineListPath));
     root!.replaceChildren(section);
   }
 
-  function layoutNodes(nodes: PipelineNodeSnapshot[]): PipelineGraphColumn[] {
-    const nodesById = new Map<string, PipelineNodeSnapshot>(
-      nodes.map((node) => [node.id, node]),
-    );
+  function layoutStages(stages: PipelineStageSummary[]): PipelineGraphColumn[] {
+    const stagesById = new Map(stages.map((stage) => [stage.id, stage]));
     const depths = new Map<string, number>();
     const visiting = new Set<string>();
 
-    function depthOf(node: PipelineNodeSnapshot): number {
-      if (depths.has(node.id)) return depths.get(node.id)!;
-      if (visiting.has(node.id)) return 0;
+    function depthOf(stage: PipelineStageSummary): number {
+      if (depths.has(stage.id)) return depths.get(stage.id)!;
+      if (visiting.has(stage.id)) return 0;
 
-      visiting.add(node.id);
-      const parents = (node.parentNodeIds || [])
-        .map((parentId) => nodesById.get(parentId))
-        .filter(Boolean) as PipelineNodeSnapshot[];
+      visiting.add(stage.id);
+      const parents = stage.parentStageIds
+        .map((parentId) => stagesById.get(parentId))
+        .filter(Boolean) as PipelineStageSummary[];
       const depth = parents.length === 0
         ? 0
         : Math.max(...parents.map((parent) => depthOf(parent))) + 1;
-      visiting.delete(node.id);
-      depths.set(node.id, depth);
+      visiting.delete(stage.id);
+      depths.set(stage.id, depth);
       return depth;
     }
 
-    const columns = new Map<number, Map<string, PipelineGraphGroup>>();
-    nodes.forEach((node) => {
-      const depth = depthOf(node);
-      if (!columns.has(depth)) columns.set(depth, new Map());
-      const pipelineName = node.pipelineName || 'pipeline';
-      const stepName = node.stepName || node.stage || node.name || 'unassigned';
-      const key = `${pipelineName}\u0000${stepName}`;
-      const groups = columns.get(depth)!;
-      if (!groups.has(key)) {
-        groups.set(key, { pipelineName, stepName, nodes: [] });
-      }
-      groups.get(key)!.nodes.push(node);
+    const columns = new Map<number, PipelineStageSummary[]>();
+    stages.forEach((stage) => {
+      const depth = depthOf(stage);
+      const column = columns.get(depth) ?? [];
+      column.push(stage);
+      columns.set(depth, column);
     });
 
     return [...columns.entries()]
       .sort(([left], [right]) => left - right)
-      .map(([depth, groups]) => ({ depth, groups: [...groups.values()] }));
+      .map(([depth, columnStages]) => ({ depth, stages: columnStages }));
   }
 
-  function nodeCard(
-    node: PipelineNodeSnapshot,
-    executionIndex?: number,
+  function stageState(stage: PipelineStageSummary): PipelineNodeStatus {
+    return STATUS_ORDER.find((status) => stage.counts[status] > 0) ?? 'PENDING';
+  }
+
+  function stageCard(
+    stage: PipelineStageSummary,
+    inspect: (stage: PipelineStageSummary, status: PipelineNodeStatus) => void,
   ): HTMLElement {
-    const card = element('article', 'node');
-    const status = normalizeStatus(node.status);
-    card.dataset.status = status;
-    card.dataset.nodeId = node.id;
-
-    const header = element('div', 'node-header');
-    if (executionIndex !== undefined) {
-      header.append(
-        element('span', 'execution-label', `Execution ${executionIndex}`),
-      );
-    }
-    header.append(element('span', 'node-status', status));
-    card.append(header);
-
-    const attempt = Number(node.attempt);
-    if (status === 'FAILED' || status === 'RETRYING' || attempt > 1) {
-      card.append(
-        element(
-          'div',
-          'node-meta',
-          `Attempt ${node.attempt}/${node.maxAttempts}`,
-        ),
-      );
-    }
-
-    if (node.error) card.append(element('div', 'node-error', node.error));
-
-    if (node.queueName && node.jobId) {
-      const reference = element('div', 'job-reference');
-      reference.title = `Job ID: ${node.jobId}`;
+    const card = element('article', 'stage-card');
+    card.dataset.stageId = stage.id;
+    card.dataset.status = stageState(stage);
+    const total = STATUS_ORDER.reduce(
+      (sum, status) => sum + stage.counts[status],
+      0,
+    );
+    append(
+      card,
       append(
-        reference,
+        element('header', 'stage-card-header'),
         append(
-          element('div', 'job-reference-label'),
-          element('span', '', 'Job ID'),
-          copyJobIdButton(node.jobId),
+          element('div'),
+          element('h2', '', stage.stepName),
+          element('p', '', stage.pipelineName),
         ),
-        element('code', '', node.jobId),
-      );
-      const link = element('a', 'job-link', 'View job');
-      link.href = jobPath(node.queueName, node.jobId);
-      append(card, append(element('footer', 'node-footer'), reference, link));
-    }
+        element('span', 'stage-total', `${total} tasks`),
+      ),
+    );
 
+    const statuses = element('div', 'stage-statuses');
+    STATUS_ORDER.forEach((status) => {
+      const count = stage.counts[status];
+      const button = element('button', 'stage-status');
+      button.type = 'button';
+      button.dataset.status = status;
+      button.title = `View ${status.toLowerCase()} tasks`;
+      button.disabled = count === 0;
+      append(
+        button,
+        element('strong', '', count),
+        element('span', '', status.toLowerCase()),
+      );
+      if (count > 0) {
+        button.addEventListener('click', () => inspect(stage, status));
+      }
+      statuses.append(button);
+    });
+    card.append(statuses);
     return card;
   }
 
@@ -347,7 +387,7 @@ interface PipelineGraphColumn {
   }
 
   function updateEdges(
-    nodes: PipelineNodeSnapshot[],
+    stages: PipelineStageSummary[],
     canvas: HTMLElement,
     connectors: SVGSVGElement,
   ): void {
@@ -355,13 +395,13 @@ interface PipelineGraphColumn {
     const canvasRect = canvas.getBoundingClientRect();
     const namespace = 'http://www.w3.org/2000/svg';
 
-    nodes.forEach((child) => {
-      const childElement = nodeElements.get(child.id);
+    stages.forEach((child) => {
+      const childElement = stageElements.get(child.id);
       if (!childElement) return;
       const childRect = childElement.getBoundingClientRect();
 
-      (child.parentNodeIds || []).forEach((parentId) => {
-        const parentElement = nodeElements.get(parentId);
+      child.parentStageIds.forEach((parentId) => {
+        const parentElement = stageElements.get(parentId);
         if (!parentElement) return;
         const parentRect = parentElement.getBoundingClientRect();
         const startX = parentRect.right - canvasRect.left;
@@ -386,67 +426,166 @@ interface PipelineGraphColumn {
     });
   }
 
-  function pipelineGraph(nodes: PipelineNodeSnapshot[]): HTMLDivElement {
-    nodeElements.clear();
+  function pipelineGraph(
+    stages: PipelineStageSummary[],
+    inspect: (stage: PipelineStageSummary, status: PipelineNodeStatus) => void,
+  ): HTMLDivElement {
+    stageElements.clear();
     resizeObserver?.disconnect();
 
     const viewport = element('div', 'graph-viewport');
     viewport.dataset.testid = 'pipeline-graph';
     const canvas = element('div', 'graph-canvas');
     const connectors = createConnectors();
-    const stages = element('div', 'stages');
+    const columns = element('div', 'stage-columns');
 
-    layoutNodes(nodes).forEach((column) => {
-      const stage = element('div', 'stage');
-      column.groups.forEach((group) => {
-        const step = element('section', 'step');
-        const header = element('header', 'step-header');
-        const title = element('div');
-        append(
-          title,
-          element('h2', '', group.stepName),
-          element(
-            'p',
-            '',
-            group.nodes.length === 1
-              ? group.pipelineName
-              : `${group.pipelineName} · ${group.nodes.length} executions`,
-          ),
-        );
-        header.append(title);
-
-        const nodeList = element('div', 'nodes');
-        group.nodes.forEach((node, nodeIndex) => {
-          const card = nodeCard(
-            node,
-            group.nodes.length > 1 ? nodeIndex + 1 : undefined,
-          );
-          nodeElements.set(node.id, card);
-          nodeList.append(card);
-        });
-        append(step, header, nodeList);
-        stage.append(step);
+    layoutStages(stages).forEach((column) => {
+      const columnElement = element('div', 'stage-column');
+      columnElement.dataset.depth = String(column.depth);
+      column.stages.forEach((stage) => {
+        const card = stageCard(stage, inspect);
+        stageElements.set(stage.id, card);
+        columnElement.append(card);
       });
-      stages.append(stage);
+      columns.append(columnElement);
     });
 
-    append(canvas, connectors, stages);
+    append(canvas, connectors, columns);
     viewport.append(canvas);
 
-    redrawEdges = () => updateEdges(nodes, canvas, connectors);
+    redrawEdges = () => updateEdges(stages, canvas, connectors);
     requestAnimationFrame(redrawEdges);
     if ('ResizeObserver' in globalThis) {
       const observer = new ResizeObserver(redrawEdges);
       resizeObserver = observer;
       observer.observe(canvas);
-      nodeElements.forEach((node) => observer.observe(node));
+      stageElements.forEach((stage) => observer.observe(stage));
     }
 
     return viewport;
   }
 
+  function nodeRow(node: PipelineNodeSnapshot): HTMLElement {
+    const row = element('article', 'node-row');
+    const status = node.status;
+    row.dataset.status = status;
+    row.dataset.nodeId = node.id;
+    const main = element('div', 'node-row-main');
+    append(
+      main,
+      statusBadge(status),
+      element(
+        'span',
+        'node-attempt',
+        `Attempt ${node.attempt}/${node.maxAttempts}`,
+      ),
+    );
+    if (node.error) main.append(element('p', 'node-error', node.error));
+
+    const actions = element('div', 'node-row-actions');
+    if (node.jobId) {
+      append(
+        actions,
+        append(
+          element('div', 'job-reference'),
+          append(
+            element('div', 'job-reference-label'),
+            element('span', '', 'Job ID'),
+            copyJobIdButton(node.jobId),
+          ),
+          element('code', '', node.jobId),
+        ),
+      );
+    }
+    if (node.queueName && node.jobId) {
+      const link = element('a', 'job-link', 'View job');
+      link.href = jobPath(node.queueName, node.jobId);
+      actions.append(link);
+    }
+    append(row, main, actions);
+    return row;
+  }
+
+  async function inspectStageNodes(
+    run: PipelineRunSummary,
+    stage: PipelineStageSummary,
+    status: PipelineNodeStatus,
+    page: number,
+    inspector: HTMLElement,
+  ): Promise<void> {
+    inspector.hidden = false;
+    inspector.replaceChildren(
+      element('div', 'loading-inline', `Loading ${status.toLowerCase()} tasks`),
+    );
+    inspector.scrollIntoView({ block: 'nearest' });
+
+    try {
+      const path = `/api/pipelines/${encodeURIComponent(run.id)}/stages/${
+        encodeURIComponent(stage.id)
+      }/nodes?status=${
+        encodeURIComponent(status)
+      }&page=${page}&pageSize=${NODE_PAGE_SIZE}`;
+      const response = await requestJson<PipelineStageNodesResponse>(path);
+      if (!response) return;
+
+      const header = element('header', 'inspector-header');
+      const title = element('div');
+      append(
+        title,
+        element('p', 'eyebrow', stage.pipelineName),
+        element('h2', '', `${stage.stepName} · ${status.toLowerCase()}`),
+      );
+      const close = element('button', 'inspector-close', '×');
+      close.type = 'button';
+      close.title = 'Close task list';
+      close.setAttribute('aria-label', 'Close task list');
+      close.addEventListener('click', () => {
+        inspector.hidden = true;
+        inspector.replaceChildren();
+      });
+      append(header, title, close);
+
+      const list = element('div', 'node-list');
+      response.nodes.forEach((node) => list.append(nodeRow(node)));
+      if (response.nodes.length === 0) {
+        list.append(element('div', 'empty', 'No tasks remain in this status.'));
+      }
+
+      const nodePagination = element('nav', 'pagination');
+      const previous = element('button', 'pagination-link', 'Previous');
+      previous.type = 'button';
+      previous.disabled = !response.pageInfo.hasPreviousPage;
+      previous.addEventListener(
+        'click',
+        () => inspectStageNodes(run, stage, status, page - 1, inspector),
+      );
+      const next = element('button', 'pagination-link', 'Next');
+      next.type = 'button';
+      next.disabled = !response.pageInfo.hasNextPage;
+      next.addEventListener(
+        'click',
+        () => inspectStageNodes(run, stage, status, page + 1, inspector),
+      );
+      append(
+        nodePagination,
+        previous,
+        element('span', 'pagination-page', `Page ${response.pageInfo.page}`),
+        next,
+      );
+      inspector.replaceChildren(header, list, nodePagination);
+    } catch (error) {
+      inspector.replaceChildren(
+        element(
+          'div',
+          'error',
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   function renderRun(details: PipelineRunDetails): void {
-    const { run, nodes } = details;
+    const { run, stages } = details;
     const section = element('section', 'page');
     const header = element('header', 'page-header');
     const title = element('div');
@@ -462,18 +601,23 @@ interface PipelineGraphColumn {
     const summary = element('div', 'summary');
     append(
       summary,
-      element('span', 'summary-item', `${run.pendingNodes} pending`),
-      element('span', 'summary-item', `${nodes.length} executions`),
+      element('span', 'summary-item', runTaskSummary(run)),
+      element('span', 'summary-item', `${stages.length} stages`),
       statusBadge(run.status),
     );
     append(header, title, pageActions(summary));
     section.append(header);
 
     if (run.error) section.append(element('div', 'run-error', run.error));
+    const inspector = element('section', 'node-inspector');
+    inspector.hidden = true;
     section.append(
-      nodes.length === 0
-        ? element('div', 'empty', 'Waiting for pipeline executions.')
-        : pipelineGraph(nodes),
+      stages.length === 0
+        ? element('div', 'empty', 'Waiting for pipeline stages.')
+        : pipelineGraph(stages, (stage, status) => {
+          inspectStageNodes(run, stage, status, 1, inspector);
+        }),
+      inspector,
     );
     root!.replaceChildren(section);
   }
@@ -490,11 +634,11 @@ interface PipelineGraphColumn {
         }
       } else {
         const response = await requestJson<PipelineRunsResponse>(
-          '/api/pipelines',
+          `/api/pipelines?page=${runPage}&pageSize=${LIST_PAGE_SIZE}`,
         );
         if (response) {
           lastUpdatedAt = Date.now();
-          renderRuns(response.runs || []);
+          renderRuns(response);
         }
       }
     } catch (error) {

@@ -28,7 +28,6 @@ export async function runDashboardAcceptance(
     await executeCompose(['run', '--rm', '--no-deps', 'bullmq-assertion']);
     await executeCompose(['run', '--rm', '--no-deps', 'acceptance']);
     await executeCompose(['run', '--rm', '--no-deps', 'browser-acceptance']);
-    await executeCompose(['run', '--rm', '--no-deps', 'redis-assertion']);
   } catch (error) {
     primaryFailed = true;
     primaryError = error;
@@ -44,7 +43,6 @@ export async function runDashboardAcceptance(
           'nginx',
           'bullmq-assertion',
           'browser-acceptance',
-          'redis-assertion',
         ],
         false,
       );

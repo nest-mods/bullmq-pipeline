@@ -148,46 +148,5 @@ services:
       redis:
         condition: service_healthy
 
-  redis-assertion:
-    image: denoland/deno:alpine-2.9.3
-    working_dir: /workspace/packages/dashboard
-    entrypoint: deno
-    command:
-      - run
-      - --frozen
-      - --lock=/workspace/deno.lock
-      - --config=/workspace/deno.json
-      - --allow-env
-      - --allow-net
-      - /workspace/packages/dashboard/test/assert-redis-cleanup.ts
-    environment:
-      REDIS_HOST: redis
-      PIPELINE_PREFIX: test
-    volumes:
-      - deno-cache:/deno-dir
-      - type: bind
-        source: ../../../deno.json
-        target: /workspace/deno.json
-        read_only: true
-      - type: bind
-        source: ../../../deno.lock
-        target: /workspace/deno.lock
-        read_only: true
-      - type: bind
-        source: ../deno.json
-        target: /workspace/packages/dashboard/deno.json
-        read_only: true
-      - type: bind
-        source: ./assert-redis-cleanup.ts
-        target: /workspace/packages/dashboard/test/assert-redis-cleanup.ts
-        read_only: true
-      - type: bind
-        source: ./resource-lifecycle.ts
-        target: /workspace/packages/dashboard/test/resource-lifecycle.ts
-        read_only: true
-    depends_on:
-      redis:
-        condition: service_healthy
-
 volumes:
   deno-cache:

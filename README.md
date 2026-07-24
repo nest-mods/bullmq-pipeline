@@ -15,8 +15,8 @@ and usable as a trusted Deno runtime extension.
   `@nest-mods/bullmq-pipeline`, including its npm consumer manifest, empty
   entrypoint, and test placeholder.
 - `packages/dashboard`: implemented Deno runtime extension loaded by Bull Board
-  through `mod.ts`. It reads pipeline snapshots from Redis and serves the run
-  list, run details, dependency graph, and browser assets under `public/`.
+  through `mod.ts`. It serves a paged Run list, folded Stage graph,
+  status-filtered Node pages, and browser assets under `public/`.
 - `packages/dashboard/test`: disposable Docker acceptance stack for the real
   Bull Board host integration.
 
